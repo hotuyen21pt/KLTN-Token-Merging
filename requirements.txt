@@ -1,0 +1,20 @@
+# Python 3.10+ (64-bit) khuyến nghị. Python 3.8 thường không cài được bộ PyABSA/spaCy hiện tại trên Windows.
+#
+# Cài đặt:
+#   cd thesis_apc_baseline
+#   py -3.12 -m venv .venv
+#   .venv\Scripts\activate
+#   python -m pip install -U pip
+#   pip install -r requirements.txt
+#   python -m spacy download en_core_web_sm
+#
+# Chạy thử (đứng ở thư mục CHA của thesis_apc_baseline, ví dụ kltn):
+#   python thesis_apc_baseline\experiments\train_baseline.py
+#   python thesis_apc_baseline\experiments\compare_baseline_tome.py
+#
+# Hoặc đứng trong thesis_apc_baseline:
+#   .venv\Scripts\python.exe experiments\train_baseline.py
+
+pyabsa>=2.4.0,<3
+torch>=2.0.0
+transformers>=4.36.0

@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+
+# Model checkpoints
+checkpoints/
+*.pt
+*.bin
+
+# Results
+results/
+
+# Dataset (optional)
+dataset/
+
+# OS
+.DS_Store
+Thumbs.db
