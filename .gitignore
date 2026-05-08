@@ -13,8 +13,6 @@ checkpoints/
 # Results
 results/
 
-# Dataset (optional)
-dataset/
 
 # OS
 .DS_Store

@@ -23,8 +23,49 @@ TrainStyleItem = Union[
 ]
 
 
+def _patch_transformers_tokenizer_compat() -> None:
+    """Patch tokenizer attrs for older PyABSA checkpoints on newer transformers."""
+    try:
+        from transformers.models.bert.tokenization_bert import BertTokenizer
+    except Exception:
+        BertTokenizer = None  # type: ignore
+
+    if BertTokenizer is not None and not hasattr(BertTokenizer, "vocab"):
+        def _safe_vocab(self: Any) -> Any:
+            # Avoid recursion: transformers get_vocab() may call self.vocab.
+            v = getattr(self, "_vocab", None)
+            if v is not None:
+                return v
+            try:
+                return self.__dict__.get("vocab", {})
+            except Exception:
+                return {}
+
+        setattr(
+            BertTokenizer,
+            "vocab",
+            property(_safe_vocab),
+        )
+
+    # Older pickled tokenizers may miss private token attrs expected by newer
+    # transformers tokenizer __repr__/special_tokens_map logic.
+    if BertTokenizer is not None:
+        for attr in (
+            "_bos_token",
+            "_eos_token",
+            "_unk_token",
+            "_sep_token",
+            "_pad_token",
+            "_cls_token",
+            "_mask_token",
+            "_additional_special_tokens",
+        ):
+            if not hasattr(BertTokenizer, attr):
+                setattr(BertTokenizer, attr, None if attr != "_additional_special_tokens" else [])
+
+
 def train_style_to_pyabsa_text(sentence_with_t: str, aspect: str) -> str:
-    """Turn train-like APC lines (1–2) into the ``[ASP]`` string expected by ``SentimentClassifier.predict``.
+    """Turn train-like APC lines (1–2) into the aspect-tagged text for ``SentimentClassifier.predict``.
 
     Train APC line 1 uses a single ``$T$`` where the aspect phrase sits; line 2 is the aspect string.
     """
@@ -39,7 +80,7 @@ def train_style_to_pyabsa_text(sentence_with_t: str, aspect: str) -> str:
     asp = aspect.strip()
     if not asp:
         raise ValueError("aspect must be non-empty.")
-    return "{} [ASP] {} [ASP] {}".format(left.rstrip(), asp, right.lstrip()).strip()
+    return "{} [B-ASP] {} [E-ASP] {}".format(left.rstrip(), asp, right.lstrip()).strip()
 
 
 def normalize_train_style_item(item: TrainStyleItem) -> Tuple[str, str]:
@@ -61,6 +102,7 @@ def load_apc_sentiment_classifier(checkpoint_dir: Union[str, Path], **kwargs: An
     Registers ``FAST_LCF_BERT_TOME`` so ToMe checkpoints unpickle correctly.
     """
     register_fast_lcf_bert_tome()
+    _patch_transformers_tokenizer_compat()
     return APC.SentimentClassifier(str(checkpoint_dir), **kwargs)
 
 
