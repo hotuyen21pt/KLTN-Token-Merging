@@ -9,5 +9,7 @@ python thesis_apc_baseline/experiments/infer_one.py --checkpoint thesis_apc_base
 #full pipeline
 python thesis_apc_baseline/experiments/infer_clause_sentiment.py --checkpoint "thesis_apc_baseline/checkpoints/fast_lcf_bert_tome/fast_lcf_bert_tome_custom_dataset_acc_77.68_f1_62.83" --sentence "The pizza was great but the staff was rude and the restaurant was noisy." --show-intermediate --hf-token ""
 
-#show step merge
-python thesis_apc_baseline/experiments/infer_one.py --checkpoint "thesis_apc_baseline/checkpoints/fast_lcf_bert_tome/fast_lcf_bert_tome_custom_dataset_acc_77.68_f1_62.83" --sentence "The $T$ was great but the staff was rude and the restaurant was noisy." --aspect "pizza" --show-steps
+#show step merge in text file 
+python thesis_apc_baseline/experiments/infer_one.py --checkpoint "thesis_apc_baseline/checkpoints/fast_lcf_bert_tome/fast_lcf_bert_tome_custom_dataset_acc_77.68_f1_62.83" --sentence "The $T$ was great but the staff was rude." --aspect "pizza" --show-steps --output-text thesis_apc_baseline\runs\last_infer.txt
+
+pip install -r thesis_apc_baseline/requirements.txt
