@@ -57,33 +57,60 @@ def split_sentence_with_terms_llm(
     """
     prompt = (
         "You are an expert linguist working on Aspect-Based Sentiment Analysis (ABSA).\n"
-        "Your task is to split the following review sentence into smaller clauses and identify the aspect/term discussed in each clause.\n\n"
+        "Your task is to split the following review sentence into smaller clauses and identify:\n"
+        "- the aspect/term discussed in each clause\n"
+        "- the opinion expression associated with that term\n\n"
+
         "==================== STRICT RULES ====================\n"
         "1. DO NOT add, remove, translate, explain, or modify ANY words, symbols, or punctuation in the original sentence.\n"
         "   - Every clause must be a continuous substring of the original sentence.\n"
         "   - The output must cover all parts of the sentence - no content should be ignored or missing.\n"
-        "2. Only split the sentence where it makes sense semantically - typically around conjunctions ('and', 'but', 'while', 'although', etc.) "
-        "or when the opinion changes.\n"
+
+        "2. Only split the sentence where it makes sense semantically - typically around conjunctions "
+        "('and', 'but', 'while', 'although', etc.) or when the opinion changes.\n"
         "   - Do NOT split phrases that grammatically or logically belong to the same subject.\n"
         "   - If a descriptive phrase does not have a clear term in the sentence, keep it as a separate clause but leave Term blank.\n"
-        "3. Keep the exact original wording and order in each clause. Do NOT reorder, paraphrase, or summarize.\n"
+
+        "3. Keep the exact original wording and order in each clause.\n"
+        "   - Do NOT reorder, paraphrase, summarize, normalize, or rewrite.\n"
+
         "4. Each clause must express a clear opinion or evaluative meaning, either explicit or implicit.\n"
-        "5. Do NOT separate adverbs from the words they modify.\n"
+
+        "5. Do NOT separate adverbs, negations, auxiliaries, or modifiers from the words they modify.\n"
+
         "6. Keep negative or limiting words inside the same clause.\n"
+
         "7. Identify the TERM being discussed in each clause.\n"
-        "   - TERM: the main aspect or entity being described (e.g., 'staff', 'room', 'hotel').\n"
-        "   - If no clear term appears, leave it blank.\n"
-        "8. Avoid creating meaningless or redundant clauses.\n"
-        "9. If multiple terms appear in the same clause, separate them with commas.\n"
-        "10. If a clause refers to the same entity as a previous one but does not repeat it explicitly, propagate the term from the previous clause.\n\n"
+        "   - TERM: the main aspect or entity being described.\n"
+        "   - Examples: 'staff', 'room', 'hotel', 'pizza'.\n"
+        "   - If multiple terms appear, separate them with commas.\n"
+        "   - If no clear term appears, leave Term blank.\n"
+
+        "8. Identify the OPINION expression associated with the term.\n"
+        "   - OPINION must be an exact substring from the clause.\n"
+        "   - Include complete sentiment expressions such as:\n"
+        "       'delicious'\n"
+        "       'small'\n"
+        "       'arrived late'\n"
+        "       'very friendly'\n"
+        "   - Keep negation/modifiers together.\n"
+        "   - If no clear opinion exists, leave Opinion blank.\n"
+
+        "9. Avoid creating meaningless or redundant clauses.\n"
+
+        "10. If a clause refers to the same entity as a previous one but does not repeat it explicitly, propagate the term from the previous clause.\n"
+
         "==================== COVERAGE REQUIREMENT ====================\n"
         "Every part of the original sentence must appear in at least one clause.\n"
         "Do NOT skip, shorten, or drop any meaningful phrase.\n\n"
+
         "==================== OUTPUT FORMAT ====================\n"
-        "Clause: <clause text> | Term: <term1,term2,...>\n\n"
+        "Clause: <clause text> | Term: <term1,term2,...> | Opinion: <opinion text>\n\n"
+
         "==================== RESPONSE INSTRUCTION ====================\n"
-        "Respond ONLY with the clauses and terms exactly in the format shown above.\n"
-        "Do NOT include any explanation, reasoning, or commentary.\n\n"
+        "Respond ONLY with the clauses exactly in the required format.\n"
+        "Do NOT include explanations, numbering, markdown, or commentary.\n\n"
+
         f"Now process this sentence WITHOUT changing any words:\n{sentence}"
     )
 
@@ -96,29 +123,44 @@ def split_sentence_with_terms_llm(
 
     result: List[Dict[str, str]] = []
     last_term = ""
+    last_opinion = ""
 
     for line in response.split("\n"):
         line = line.strip()
         if not line:
             continue
 
-        if "| Term:" in line:
-            clause_text, term = line.split("| Term:", 1)
-            clause_text = clause_text.replace("Clause:", "", 1).strip()
-            term = term.strip()
-            if term == "":
-                term = last_term
-            else:
-                last_term = term
+        # Parse "Clause: ... | Term: ... | Opinion: ..." robustly.
+        clause_text = ""
+        term = last_term
+        opinion = last_opinion
+
+        # First, split opinion if present (keep left part for clause/term parsing).
+        left = line
+        if "| Opinion:" in line:
+            left, op = line.split("| Opinion:", 1)
+            op = op.strip()
+            if op != "":
+                opinion = op
+                last_opinion = op
+
+        # Now parse term (optional) from the remaining part.
+        if "| Term:" in left:
+            cl, tm = left.split("| Term:", 1)
+            clause_text = cl.replace("Clause:", "", 1).strip()
+            tm = tm.strip()
+            if tm != "":
+                term = tm
+                last_term = tm
         else:
-            clause_text = line
-            term = last_term
+            clause_text = left.replace("Clause:", "", 1).strip()
 
         if clause_text:
             result.append(
                 {
                     "clause": clause_text,
                     "term": term,
+                    "opinion": opinion,
                     "sentence_original": sentence,
                 }
             )
@@ -157,6 +199,7 @@ def clauses_to_infer_one_inputs(
     for item in clause_items:
         clause = item.get("clause", "").strip()
         term_str = item.get("term", "").strip()
+        opinion = item.get("opinion", "").strip()
 
         if not clause or not term_str:
             continue
@@ -188,6 +231,8 @@ def clauses_to_infer_one_inputs(
                 {
                     "sentence": sentence_with_t,
                     "aspect": term,
+                    "opinion": opinion,
+                    "clause": clause,
                 }
             )
 

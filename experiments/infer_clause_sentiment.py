@@ -52,7 +52,7 @@ def _extract_sentiment_fields(pred: object) -> tuple[str, str]:
 
 
 def _print_pretty_table(outputs: list[dict[str, object]]) -> None:
-    rows: list[tuple[str, str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str]] = []
     for item in outputs:
         inp = item.get("input", {})
         pred = item.get("prediction", {})
@@ -60,13 +60,15 @@ def _print_pretty_table(outputs: list[dict[str, object]]) -> None:
             pred = pred[0]
         clause = ""
         aspect = ""
+        opinion = ""
         if isinstance(inp, dict):
             clause = str(inp.get("sentence", ""))
             aspect = str(inp.get("aspect", ""))
+            opinion = str(inp.get("opinion", ""))
         sentiment, confidence = _extract_sentiment_fields(pred)
-        rows.append((clause, aspect, sentiment, confidence))
+        rows.append((clause, aspect, opinion, sentiment, confidence))
 
-    headers = ("clause", "aspect", "sentiment", "confidence")
+    headers = ("clause", "aspect", "opinion", "sentiment", "confidence")
     widths = [len(h) for h in headers]
     for row in rows:
         for i, col in enumerate(row):
@@ -79,7 +81,7 @@ def _print_pretty_table(outputs: list[dict[str, object]]) -> None:
     print(" | ".join(_fmt(h, widths[i]) for i, h in enumerate(headers)))
     print("-+-".join("-" * w for w in widths))
     for row in rows:
-        print(" | ".join(_fmt(row[i], widths[i]) for i in range(4)))
+        print(" | ".join(_fmt(row[i], widths[i]) for i in range(5)))
 
 
 def main() -> None:
