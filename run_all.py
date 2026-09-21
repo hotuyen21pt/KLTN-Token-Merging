@@ -787,17 +787,74 @@ def stage_ate(ctx: Ctx) -> None:
         raise RuntimeError(f"run_multiseed_ate.py thất bại (exit {rc})")
 
 
-def stage_ate_infer(ctx: Ctx) -> None:
-    """Infer ATE trên tập test → runs_ate/test_ate_predictions.csv (dùng cho mọi eval e2e)."""
+def ensure_ate_checkpoint(ctx: Ctx) -> Optional[Path]:
+    """Trả về checkpoint T5 ATE, tự chạy stage `ate` nếu chưa có.
+
+    Không có checkpoint thì `ate_infer` và `results` vô nghĩa, nên thay vì ném
+    lỗi bắt người dùng chạy tay, ta chạy luôn stage sinh ra nó.
+    Tắt bằng --no-auto-deps.
+    """
+    ckpt = ctx.ate_ckpt()
+    if ckpt is not None:
+        return ckpt
+    if ctx.dry_run:
+        # dry-run không chạy gì: trả về đường dẫn dự kiến để in ra lệnh
+        return ROOT / "checkpoints" / "gas_t5_ate" / f"seed_{ctx.seeds[0]}" / "best"
+
+    if ctx.no_train:
+        log("[bỏ qua] Chưa có checkpoint T5 ATE và đang bật --no-train.")
+        return None
+    if ctx.args.no_auto_deps:
+        raise RuntimeError(
+            "Chưa có checkpoint T5 ATE (đang bật --no-auto-deps). "
+            "Chạy `python run_all.py --stages ate` trước."
+        )
+
+    log("[phụ thuộc] Chưa có checkpoint T5 ATE → chạy stage `ate` trước.")
+    stage_ate(ctx)
     ckpt = ctx.ate_ckpt()
     if ckpt is None:
         raise RuntimeError(
-            "Không tìm thấy checkpoint T5 ATE. Chạy stage `ate` trước, "
-            "hoặc đặt checkpoint vào checkpoints/gas_t5_ate/best/."
+            "Stage `ate` đã chạy nhưng vẫn không sinh được checkpoint T5 ATE.\n"
+            f"  Xem log: {ctx.log_path('ate')}\n"
+            "  Lỗi hay gặp: thiếu `Levenshtein` (src/normalization.py import nó) "
+            "→ `pip install python-Levenshtein`"
         )
+    log(f"[phụ thuộc] OK — checkpoint: {ckpt}")
+    return ckpt
+
+
+def ensure_ate_predictions(ctx: Ctx) -> Optional[Path]:
+    """Trả về runs_ate/test_ate_predictions.csv, tự chạy `ate_infer` nếu thiếu."""
+    csv_path = ctx.out("runs_ate", "test_ate_predictions.csv")
+    if csv_path.is_file() or ctx.dry_run:
+        return csv_path
+
+    if ctx.args.no_auto_deps:
+        raise RuntimeError(
+            f"Thiếu {csv_path} (đang bật --no-auto-deps). "
+            "Chạy `python run_all.py --stages ate_infer` trước."
+        )
+
+    log(f"[phụ thuộc] Thiếu {csv_path.name} → chạy stage `ate_infer` trước.")
+    stage_ate_infer(ctx)
+    if not csv_path.is_file():
+        if ctx.no_train:
+            log("[bỏ qua] Không sinh được prediction ATE (đang --no-train).")
+            return None
+        raise RuntimeError(f"Đã chạy `ate_infer` nhưng vẫn thiếu {csv_path}")
+    return csv_path
+
+
+def stage_ate_infer(ctx: Ctx) -> None:
+    """Infer ATE trên tập test → runs_ate/test_ate_predictions.csv (dùng cho mọi eval e2e)."""
     out_csv = ctx.out("runs_ate", "test_ate_predictions.csv")
     if ctx.resume and out_csv.is_file():
         log(f"--resume: đã có {out_csv} — bỏ qua.")
+        return
+    ckpt = ensure_ate_checkpoint(ctx)
+    if ckpt is None:
+        log("[bỏ qua] Không có checkpoint T5 ATE.")
         return
     rc = run_driver("ate_infer",
                     {"ate_ckpt": str(ckpt), "out_csv": str(out_csv),
@@ -842,6 +899,14 @@ def stage_multiseed(ctx: Ctx) -> None:
         "--runs-dir", str(ctx.out("runs_multiseed")),
     ]
     ate_dir = ctx.out("runs_ate")
+    # Không có prediction ATE thì mọi cột e2e trong bảng luận văn sẽ rỗng.
+    if not ctx.dry_run and not ctx.no_train:
+        has_seed_csv = any((ate_dir / f"seed_{s}" / "test_predictions.csv").is_file()
+                           for s in ctx.seeds)
+        if not has_seed_csv and not (ate_dir / "test_ate_predictions.csv").is_file():
+            log("[phụ thuộc] Chưa có prediction ATE → eval e2e sẽ rỗng.")
+            ensure_ate_predictions(ctx)
+
     if any((ate_dir / f"seed_{s}" / "test_predictions.csv").is_file() for s in ctx.seeds):
         argv += ["--ate-csv-dir", str(ate_dir)]
     else:
@@ -892,8 +957,11 @@ def stage_gold(ctx: Ctx) -> None:
 def stage_triplet(ctx: Ctx) -> None:
     """Eval bộ ba end-to-end (ATE dự đoán → APC) cho từng backbone."""
     ate_csv = ctx.out("runs_ate", "test_ate_predictions.csv")
-    if not ctx.dry_run and not ate_csv.is_file():
-        raise RuntimeError(f"Thiếu {ate_csv} — chạy stage `ate_infer` trước.")
+    if not ctx.dry_run:
+        ate_csv = ensure_ate_predictions(ctx) or ate_csv
+        if not ate_csv.is_file():
+            log(f"[bỏ qua] Thiếu {ate_csv}.")
+            return
     for bb in ctx.backbones:
         runs_dir = ctx.runs_joint(bb)
         if not ctx.dry_run and not any(runs_dir.glob("*/best_model.pt")):
@@ -959,13 +1027,14 @@ def stage_results(ctx: Ctx) -> None:
     ATE như stage `ate_infer`, và không phụ thuộc vào stage `gas`.
     """
     results_csv = ROOT / "results.csv"
-    gas_ckpt = ctx.ate_ckpt()
+    gas_ckpt = None
     if not ctx.dry_run:
         if not results_csv.is_file():
             log(f"[bỏ qua] Không có {results_csv}.")
             return
+        gas_ckpt = ensure_ate_checkpoint(ctx)
         if gas_ckpt is None:
-            log("[bỏ qua] Không tìm thấy checkpoint T5 ATE — chạy stage `ate` trước.")
+            log("[bỏ qua] Không có checkpoint T5 ATE.")
             return
     if gas_ckpt is None:
         gas_ckpt = ROOT / "checkpoints" / "best"
@@ -1276,6 +1345,10 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    help="Bỏ qua các combo đã có checkpoint / kết quả")
     p.add_argument("--no-train", action="store_true",
                    help="Không train — chỉ inference, eval và gom báo cáo từ kết quả có sẵn")
+    p.add_argument("--no-auto-deps", action="store_true",
+                   help="Không tự chạy stage tiền đề còn thiếu (mặc định: có). "
+                        "Ví dụ mặc định `ate_infer` sẽ tự chạy `ate` khi chưa "
+                        "có checkpoint T5 ATE.")
     p.add_argument("--fail-fast", action="store_true",
                    help="Dừng ngay khi một stage lỗi (mặc định: ghi lỗi rồi chạy tiếp)")
     p.add_argument("--dry-run", action="store_true",
@@ -1421,6 +1494,7 @@ def _save_status(results: List[Dict], total: float, ctx: Ctx) -> None:
         "resume": ctx.resume,
         "no_train": ctx.no_train,
         "smoke": ctx.smoke,
+        "auto_deps": not ctx.args.no_auto_deps,
         "out_root": str(ctx.out_root),
         "data_dir": str(ctx.data_dir),
         "max_epochs": ctx.max_epochs,

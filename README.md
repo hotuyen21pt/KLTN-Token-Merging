@@ -387,6 +387,20 @@ Mỗi stage chạy trong một tiến trình con riêng (GPU memory được gi�
 các stage) và ghi log đầy đủ vào `reports/logs/<stage>.log`. Một stage hỏng
 không làm chết cả lượt chạy — dùng `--fail-fast` nếu muốn dừng ngay.
 
+**Tự chạy stage tiền đề.** Stage nào thiếu đầu vào sẽ tự chạy stage sinh ra nó,
+thay vì báo lỗi bắt chạy tay:
+
+| Stage | Cần | Tự chạy nếu thiếu |
+|---|---|---|
+| `ate_infer` | checkpoint T5 ATE | `ate` |
+| `triplet` | `runs_ate/test_ate_predictions.csv` | `ate_infer` (→ `ate`) |
+| `multiseed` | prediction ATE (cho cột e2e) | `ate_infer` (→ `ate`) |
+| `results` | checkpoint T5 ATE | `ate` |
+
+Nghĩa là `python run_all.py --stages triplet` từ repo trắng vẫn chạy được: nó
+train ATE → infer → rồi mới eval. Tắt bằng `--no-auto-deps` nếu muốn stage báo
+lỗi thay vì tự xử lý.
+
 ### 21 biến thể
 
 | Nhóm | Số lượng | Nội dung |
@@ -445,13 +459,37 @@ nhỏ được.
 
 ### Chạy trên Kaggle
 
-[`notebooks/kaggle_run_all.ipynb`](notebooks/kaggle_run_all.ipynb) — clone code từ
-GitHub (clone lần đầu, `fetch --all --prune` + `reset --hard origin/<branch>` những
-lần sau), cài thư viện còn thiếu, chạy smoke test, rồi chạy thật với `--resume`, và
-đóng gói kết quả thành zip để tải về.
+Hai notebook riêng, dùng chung phần setup (cấu hình → clone/pull → cài thư viện
+→ kiểm tra môi trường):
 
-Cần bật **Accelerator = GPU** và **Internet = On** trong panel bên phải. Phiên Kaggle
-tối đa 9–12 giờ nên lượt đầy đủ phải chia nhiều phiên — `--resume` lo phần nối tiếp.
+| Notebook | Dùng khi | Thời gian |
+|---|---|---|
+| [`notebooks/kaggle_smoke_test.ipynb`](notebooks/kaggle_smoke_test.ipynb) | Kiểm tra đường ống chạy được | 5–10 phút |
+| [`notebooks/kaggle_full_run.ipynb`](notebooks/kaggle_full_run.ipynb) | Chạy thật dữ liệu đầy đủ | ~5 phiên Kaggle |
+
+**Chạy smoke trước ít nhất một lần.** Nó có cell chẩn đoán tự in log của mọi
+stage hỏng kèm danh sách exception tìm thấy — rẻ hơn nhiều so với phát hiện lỗi
+môi trường sau 8 tiếng train.
+
+Notebook full chia 4 giai đoạn có kiểm soát thời gian và dung lượng:
+
+| Giai đoạn | Nội dung |
+|---|---|
+| 1 | `ate` + `ate_infer` — train T5 ATE đa seed |
+| 2 | `multiseed` cắt lát theo (seed × backbone × nhóm), dọn checkpoint sau mỗi lát |
+| 3 | `apc` + `gold` + `triplet` theo từng backbone |
+| 4 | `gas`, `results`, `figures`, gộp bảng, `report` |
+
+Hai ràng buộc bắt buộc phải xử lý, notebook full đã lo sẵn:
+
+- **Thời gian**: phiên Kaggle 9–12h, lượt đầy đủ có 171 lượt train → helper
+  `run()` tự bỏ qua bước kế khi sắp hết giờ, `--resume` nối phiên.
+- **Dung lượng**: checkpoint APC 0,43 GB × 168 + T5 0,83 GB × 4 = **75,9 GB** so
+  với hạn mức 20 GB của `/kaggle/working` → `prune()` xoá checkpoint
+  `multiseed` ngay sau mỗi lát. An toàn vì `run_multiseed.py` eval inline rồi
+  ghi `results_raw.csv`, và chỉ file CSV đó mới cần cho resume.
+
+Cần bật **Accelerator = GPU** và **Internet = On**.
 
 ### Yêu cầu tài nguyên
 
