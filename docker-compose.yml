@@ -1,0 +1,79 @@
+services:
+  # ── Ollama server (UOS LLM) ──────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  # ── One-shot: pull the qwen3:8b model, then exit ─────────────────────────
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "Pulling qwen3:8b (~5GB, chi lan dau)..."
+        until ollama pull qwen3:8b; do
+          echo "Ollama chua san sang, thu lai sau 3s..."
+          sleep 3
+        done
+        echo "Model qwen3:8b da san sang."
+    restart: "no"
+
+  # ── Backend (FastAPI, PyTorch CPU) ───────────────────────────────────────
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      # Checkpoint tren dia thuc te la checkpoints/best (khong phai default
+      # checkpoints/gas_t5_ate/best trong code) nen tro lai o day.
+      - ATE_CHECKPOINT=checkpoints/best
+      - APC_CHECKPOINT_DIR=runs_joint/lcf_scm_cdm_resize
+      - BERT_NAME=bert-base-uncased
+      - CLAUSE_SPLIT_MODE=uos
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      # Checkpoint & training runs khong nam trong image (qua nang) -> mount tu host.
+      - ./checkpoints:/app/checkpoints
+      - ./runs_joint:/app/runs_joint
+      # Cache HuggingFace (bert-base-uncased tai lan dau) de lan sau khong tai lai.
+      - hf-cache:/root/.cache/huggingface
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ── Frontend (React + Vite dev server) ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      # Vite dev proxy tro /predict... sang container backend.
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  ollama-data:
+  hf-cache:

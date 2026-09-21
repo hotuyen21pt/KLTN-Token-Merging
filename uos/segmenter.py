@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import List, Sequence
@@ -13,6 +14,9 @@ MODEL_ALIASES = {
     "Qwen3-8B-Instruct": "qwen3:8b",
 }
 PROMPT_VERSION = "linguistic_v11"
+
+# Allow overriding the Ollama endpoint (e.g. "http://ollama:11434" inside Docker).
+DEFAULT_OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 
 def resolve_model_name(name: str) -> str:
@@ -27,7 +31,7 @@ class OllamaUOSSegmenter:
     def __init__(
         self,
         model_name: str = "Qwen3-8B-Instruct",
-        host: str = "http://localhost:11434",
+        host: str = DEFAULT_OLLAMA_HOST,
         max_new_tokens: int = 512,
         temperature: float = 0.1,
         timeout_s: int = 180,
@@ -81,7 +85,7 @@ class OllamaUOSSegmenter:
         return [self.segment(s) for s in sentences]
 
 
-def check_ollama(host: str = "http://localhost:11434", model_name: str = "Qwen3-8B-Instruct") -> None:
+def check_ollama(host: str = DEFAULT_OLLAMA_HOST, model_name: str = "Qwen3-8B-Instruct") -> None:
     resolved = resolve_model_name(model_name)
     try:
         with urllib.request.urlopen(f"{host.rstrip('/')}/api/tags", timeout=5) as resp:

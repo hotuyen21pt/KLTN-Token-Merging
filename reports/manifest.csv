@@ -1,0 +1,26 @@
+group,path,status,size_kb,modified,description
+Môi trường,reports/00_environment.txt,OK,4.1,2026-09-21T15:10:34,Snapshot môi trường + kế hoạch chạy
+ATE,runs_ate/results_ate_multiseed.csv,THIẾU,,,P/R/F1 ATE theo từng seed
+ATE,runs_ate/results_ate_summary.txt,THIẾU,,,ATE mean±std qua các seed
+ATE,runs_ate/seed_*/test_predictions.csv,THIẾU,,,Prediction ATE theo seed (đầu vào e2e)
+ATE,runs_ate/test_ate_predictions.csv,OK,26.1,2026-06-17T08:34:01,Prediction ATE dùng chung cho eval e2e
+APC,runs_joint/experiment_results_joint.csv,OK,0.5,2026-06-15T09:58:51,Toàn bộ metric APC — BERT
+APC,runs_joint/experiment_results_joint.txt,OK,4.3,2026-06-15T09:58:51,Bảng tổng hợp APC — BERT
+APC,runs_joint_t5/experiment_results_joint.csv,THIẾU,,,Toàn bộ metric APC — T5
+APC,runs_joint_t5/experiment_results_joint.txt,THIẾU,,,Bảng tổng hợp APC — T5
+Multi-seed,runs_multiseed/thesis_tables.txt,THIẾU,,,"8 bảng luận văn (oracle, e2e, compact, paper)"
+Multi-seed,runs_multiseed/results_raw.csv,THIẾU,,,"Kết quả thô từng (backbone, config, seed)"
+Multi-seed,runs_multiseed/results_aggregated.csv,THIẾU,,,Kết quả gộp mean±std
+Multi-seed,runs_multiseed/results_summary.txt,THIẾU,,,Tóm tắt lượt chạy multi-seed
+Oracle,runs_bert_gold/*/eval_gold_aspects.csv,THIẾU,,,APC với gold aspect (trần trên)
+End-to-end,runs_ate/eval_joint_triplet_BERT.csv,OK,4.5,2026-07-23T13:16:19,Eval bộ ba e2e theo backbone
+End-to-end,runs_ate/eval_joint_triplet_T5.csv,OK,3.4,2026-07-23T13:16:19,Eval bộ ba e2e theo backbone
+End-to-end,runs_ate/eval_results_BERT.csv,OK,2.9,2026-07-23T13:16:19,Eval trên results.csv theo backbone
+End-to-end,runs_ate/eval_results_T5.csv,OK,2.9,2026-07-23T13:16:19,Eval trên results.csv theo backbone
+GAS,runs_gas/eval_test.json,THIẾU,,,GAS một bước — metric JSON
+GAS,runs_gas/eval_test.csv,THIẾU,,,GAS một bước — metric CSV
+UOS,uos/output/test/metrics.json,THIẾU,,,Thống kê tách câu UOS
+UOS,uos/output/test/results.jsonl,OK,0.5,2026-06-15T09:58:51,Kết quả tách câu từng câu
+Hình,thesis/figures/scm_example.pdf,OK,53.6,2026-07-23T13:16:19,Hình luận văn (PDF)
+Hình,thesis/figures/scm_example.png,OK,229.5,2026-07-23T13:16:19,Hình luận văn (PNG)
+Log,reports/logs/*.log,THIẾU,,,Log đầy đủ của từng stage

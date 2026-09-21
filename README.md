@@ -185,6 +185,12 @@ thesis_apc_baseline/
 │   ├── run_multiseed.py            # Huấn luyện nhiều seed, tổng hợp bảng cho luận văn
 │   └── run_multiseed_ate.py        # Tương tự, cho module ATE
 │
+├── run_all.py                      # Chạy FULL luồng 21 biến thể + sinh reports/
+├── reports/                        # Báo cáo tổng hợp do run_all.py sinh ra
+│   ├── REPORT.md                   # Báo cáo chính (trạng thái stage + bảng kết quả)
+│   ├── manifest.csv                # Danh mục mọi artifact + trạng thái
+│   └── logs/<stage>.log            # Log đầy đủ từng stage
+│
 ├── run_inference.ps1               # Khởi động Ollama + Backend + Frontend (Windows)
 ├── run_inference.bat               # Wrapper double-click cho run_inference.ps1
 └── requirements.txt
@@ -338,6 +344,116 @@ pip install -r requirements.txt
 | `fastapi` + `uvicorn` | ≥ 0.109.0 | REST API backend |
 | `python-docx` | ≥ 0.8.12 | Upload file .docx |
 | `python-multipart` | ≥ 0.0.6 | Multipart form data |
+
+---
+
+## Chạy full luồng bằng một lệnh — `run_all.py`
+
+`run_all.py` điều phối toàn bộ pipeline (train → inference → đánh giá → hình →
+báo cáo) cho **21 biến thể** mô hình, rồi gom mọi kết quả vào `reports/`.
+Script không cài đặt lại logic nào — nó gọi đúng các script đã có trong repo và
+inject cấu hình cho những script vốn hard-code hằng số ở module level.
+
+```bash
+python run_all.py                              # full: 3 seeds × 2 backbone × 21 biến thể
+python run_all.py --list                       # xem danh sách stage + biến thể
+python run_all.py --dry-run                    # in ra lệnh sẽ chạy, không thực thi
+python run_all.py --resume                     # chạy tiếp, bỏ qua combo đã xong
+python run_all.py --seeds 42 --backbones bert  # bản rút gọn cho máy yếu
+python run_all.py --variants resize            # chỉ 12 cấu hình resize
+python run_all.py --smoke                      # CHẠY THỬ trên data tí hon, ~5-10 phút
+python run_all.py --skip uos gas               # bỏ UOS (cần Ollama) và GAS
+python run_all.py --stages report              # chỉ sinh lại báo cáo từ kết quả cũ
+```
+
+### Các stage (chạy theo thứ tự này)
+
+| Stage | Việc làm | Kết quả |
+|---|---|---|
+| `env` | Preflight: thư viện, CUDA, dữ liệu, checkpoint sẵn có | `reports/00_environment.txt` |
+| `ate` | Train T5 ATE (GAS) đa seed | `checkpoints/gas_t5_ate/seed_<N>/best`, `runs_ate/results_ate_multiseed.csv`, `results_ate_summary.txt` |
+| `ate_infer` | Infer ATE trên tập test | `runs_ate/test_ate_predictions.csv` |
+| `apc` | Train mọi biến thể APC (seed đầu tiên) | `runs_joint/<config>/best_model.pt` (BERT), `runs_joint_t5/…` (T5), `experiment_results_joint.{csv,txt}` |
+| `multiseed` | Train đa seed + oracle/e2e eval | `runs_multiseed/thesis_tables.txt` (8 bảng luận văn), `results_raw.csv`, `results_aggregated.csv` |
+| `gold` | Oracle eval với gold aspect term | `runs_bert_gold/{BERT,T5}/eval_gold_aspects.csv` |
+| `triplet` | Eval bộ ba end-to-end (ATE → APC) | `runs_ate/eval_joint_triplet_{BERT,T5}.csv` |
+| `gas` | Train + eval GAS một bước | `checkpoints_gas/best`, `runs_gas/eval_test.{json,csv}` |
+| `results` | Eval trên `results.csv` (cần checkpoint GAS) | `runs_ate/eval_results_{BERT,T5}.csv` |
+| `uos` | Tách câu bằng LLM qua Ollama | `uos/output/test/{results.jsonl,metrics.json}` |
+| `figures` | Sinh hình luận văn | `thesis/figures/*.{pdf,png}` |
+| `report` | Gom tất cả lại | `reports/REPORT.md`, `reports/manifest.csv` |
+
+Mỗi stage chạy trong một tiến trình con riêng (GPU memory được giải phóng giữa
+các stage) và ghi log đầy đủ vào `reports/logs/<stage>.log`. Một stage hỏng
+không làm chết cả lượt chạy — dùng `--fail-fast` nếu muốn dừng ngay.
+
+### 21 biến thể
+
+| Nhóm | Số lượng | Nội dung |
+|---|---|---|
+| `resize` | 12 | Baseline, LCF-only (CDM/CDW), ToMe-only (Bip/SLM/SCM), LCF×ToMe×{CDM,CDW} — đều `tome_resize=True` |
+| `compact` | 6 | LCF×{Bip,SLM,SCM}×{CDM,CDW} với `tome_resize=False` (đối chứng resize vs compact) |
+| `pretome` | 3 | Gộp token **trước** BERT encoder: `lcf_pre_bip`, `lcf_pre_seq`, `lcf_pre_scm` |
+
+Xem đầy đủ cờ của từng biến thể bằng `python run_all.py --list`.
+
+> **Lưu ý về đặt tên:** `runs_multiseed/` dùng id ngắn (`lcf_scm_cdm`) vì các
+> bảng luận văn tham chiếu theo id đó, còn `runs_joint/` giữ quy ước có hậu tố
+> (`lcf_scm_cdm_resize`) cho khớp với `README` và mặc định
+> `APC_CHECKPOINT_DIR` của `server/app.py`. `run_all.py` giữ cả hai id cho mỗi
+> biến thể nên hai bộ kết quả luôn khớp nhau.
+
+### Chạy thử trước khi tốn GPU — `--smoke`
+
+```bash
+python run_all.py --smoke
+```
+
+Dựng một dataset tí hon (48 train / 16 dev / 16 test, cắt từ `dataset/` giữ nguyên
+thứ tự để `test_sentences_id.csv` vẫn align theo index với `test.apc`), rồi chạy
+**toàn bộ** đường ống với 1 epoch, 1 seed, 3 biến thể phủ đủ 3 nhánh code
+(`lcf_scm_cdm` = post-ToMe resize, `lcf_scm_cdm_compact` = post-ToMe compact,
+`lcf_pre_scm` = pre-ToMe). Khoảng 5–10 phút trên GPU.
+
+Mọi output đi vào `smoke_run/` — **không đè lên kết quả thật**:
+
+```
+dataset_smoke/          # dữ liệu tí hon
+smoke_run/
+├── checkpoints/        ├── runs_joint/        ├── runs_bert_gold/
+├── checkpoints_gas/    ├── runs_joint_t5/     ├── runs_gas/
+├── runs_ate/           ├── runs_multiseed/    ├── thesis_figures/
+└── reports/REPORT.md + manifest.csv + logs/<stage>.log
+```
+
+Hai cờ dùng chung với chế độ thật:
+
+```bash
+python run_all.py --max-epochs 2          # giới hạn epoch cho mọi bước train
+python run_all.py --out-root /tmp/thu     # đổi thư mục output gốc
+python run_all.py --data-dir dataset_alt  # đổi thư mục dữ liệu
+```
+
+Stage `results` bị bỏ qua khi smoke: `experiments/eval_results.py` hard-code
+`ROOT/"dataset"` ở module level (dòng 103, 213, 350) nên không chuyển sang dataset
+nhỏ được.
+
+### Chạy trên Kaggle
+
+[`notebooks/kaggle_run_all.ipynb`](notebooks/kaggle_run_all.ipynb) — clone code từ
+GitHub (clone lần đầu, `fetch --all --prune` + `reset --hard origin/<branch>` những
+lần sau), cài thư viện còn thiếu, chạy smoke test, rồi chạy thật với `--resume`, và
+đóng gói kết quả thành zip để tải về.
+
+Cần bật **Accelerator = GPU** và **Internet = On** trong panel bên phải. Phiên Kaggle
+tối đa 9–12 giờ nên lượt đầy đủ phải chia nhiều phiên — `--resume` lo phần nối tiếp.
+
+### Yêu cầu tài nguyên
+
+Lần chạy đầy đủ mặc định gồm 126 lượt train APC (21 biến thể × 3 seed × 2
+backbone) ở stage `multiseed`, cộng 42 lượt ở stage `apc` và 3 lượt train T5
+ATE. Trên một GPU đơn, hãy tính bằng ngày chứ không phải giờ. Dùng `--resume`
+để chạy nhiều phiên, hoặc thu hẹp bằng `--seeds 42 --backbones bert --variants resize`.
 
 ---
 

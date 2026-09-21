@@ -1,0 +1,35 @@
+# VCS / IDE
+.git
+.gitignore
+
+# Python
+__pycache__/
+**/__pycache__/
+*.pyc
+.venv/
+
+# Node / frontend build (frontend has its own image)
+frontend/node_modules/
+frontend/dist/
+
+# Large model checkpoints & training runs — mounted at runtime, not baked in
+checkpoints/
+checkpoints_gas/
+runs_joint/
+runs_multiseed/
+runs_ate/
+runs_bert_gold/
+Bert/
+T5/
+*.pt
+*.bin
+
+# Thesis / docs / notebooks not needed for inference
+thesis/
+docs/
+notebooks/
+slide.js
+
+# Misc
+.DS_Store
+Thumbs.db

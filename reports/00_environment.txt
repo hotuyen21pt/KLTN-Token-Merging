@@ -1,0 +1,59 @@
+Thời điểm     : 2026-09-21T15:10:31
+Repo root     : C:/Users/User1/Desktop/Linh tin/KLTN-Token-Merging
+Python        : 3.14.3  (C:/msys64/mingw64/bin/python.exe)
+Platform      : Windows-11-10.0.26200-SP0
+
+  torch         : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  transformers  : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  sklearn       : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  numpy         : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  pandas        : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  matplotlib    : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  seaborn       : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  Levenshtein   : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+  fastapi       : 0.135.1
+  tqdm          : KHÔNG CÀI ĐƯỢC (ModuleNotFoundError)
+
+CUDA check lỗi: No module named 'torch'
+
+Dữ liệu:
+  [OK]   dataset/train.apc                         227.0 KB  9792 dòng
+  [OK]   dataset/dev.apc                            27.2 KB  1216 dòng
+  [OK]   dataset/test.apc                           27.4 KB  1248 dòng
+  [OK]   dataset/test_sentences_id.csv              30.0 KB  313 dòng
+  [OK]   dataset/supplement/negative.tsv            73.5 KB  664 dòng
+  [OK]   dataset/supplement/neutral.tsv             10.4 KB  115 dòng
+  [OK]   results.csv                                69.9 KB  613 dòng
+
+ATE checkpoint hiện có : C:/Users/User1/Desktop/Linh tin/KLTN-Token-Merging/checkpoints/best
+GAS checkpoint hiện có : KHÔNG CÓ (stage `gas` sẽ train mới)
+APC checkpoint BERT  : 1 cấu hình đã có → ['lcf_scm_cdm_resize']
+APC checkpoint T5    : 0 cấu hình đã có → []
+Ollama (cho UOS)       : đang chạy
+
+Kế hoạch:
+  Seeds     : [42, 123, 456]
+  Backbones : ['bert', 't5']
+  Biến thể  : 21 (resize, compact, pretome)
+    - baseline               Base                   lcf=0 cdm=0 tome=0 resize=1 pre=0 strategy=bipartite
+    - lcf_only_cdm           CDM                    lcf=1 cdm=1 tome=0 resize=1 pre=0 strategy=bipartite
+    - lcf_only_cdw           CDW                    lcf=1 cdm=0 tome=0 resize=1 pre=0 strategy=bipartite
+    - bip                    BiToMe                 lcf=0 cdm=0 tome=1 resize=1 pre=0 strategy=bipartite
+    - seq                    SLM                    lcf=0 cdm=0 tome=1 resize=1 pre=0 strategy=sequential_local
+    - scm                    SCM                    lcf=0 cdm=0 tome=1 resize=1 pre=0 strategy=sequential_cosine
+    - lcf_bip_cdm            BiToMe+CDM             lcf=1 cdm=1 tome=1 resize=1 pre=0 strategy=bipartite
+    - lcf_bip_cdw            BiToMe+CDW             lcf=1 cdm=0 tome=1 resize=1 pre=0 strategy=bipartite
+    - lcf_seq_cdm            SLM+CDM                lcf=1 cdm=1 tome=1 resize=1 pre=0 strategy=sequential_local
+    - lcf_seq_cdw            SLM+CDW                lcf=1 cdm=0 tome=1 resize=1 pre=0 strategy=sequential_local
+    - lcf_scm_cdm            SCM+CDM                lcf=1 cdm=1 tome=1 resize=1 pre=0 strategy=sequential_cosine
+    - lcf_scm_cdw            SCM+CDW                lcf=1 cdm=0 tome=1 resize=1 pre=0 strategy=sequential_cosine
+    - lcf_bip_cdm_compact    BiToMe+CDM(compact)    lcf=1 cdm=1 tome=1 resize=0 pre=0 strategy=bipartite
+    - lcf_bip_cdw_compact    BiToMe+CDW(compact)    lcf=1 cdm=0 tome=1 resize=0 pre=0 strategy=bipartite
+    - lcf_seq_cdm_compact    SLM+CDM(compact)       lcf=1 cdm=1 tome=1 resize=0 pre=0 strategy=sequential_local
+    - lcf_seq_cdw_compact    SLM+CDW(compact)       lcf=1 cdm=0 tome=1 resize=0 pre=0 strategy=sequential_local
+    - lcf_scm_cdm_compact    SCM+CDM(compact)       lcf=1 cdm=1 tome=1 resize=0 pre=0 strategy=sequential_cosine
+    - lcf_scm_cdw_compact    SCM+CDW(compact)       lcf=1 cdm=0 tome=1 resize=0 pre=0 strategy=sequential_cosine
+    - lcf_pre_bip            LCF+PreBip             lcf=1 cdm=1 tome=0 resize=0 pre=1 strategy=bipartite
+    - lcf_pre_seq            LCF+PreSLM             lcf=1 cdm=1 tome=0 resize=0 pre=1 strategy=sequential_local
+    - lcf_pre_scm            LCF+PreSCM             lcf=1 cdm=1 tome=0 resize=0 pre=1 strategy=sequential_cosine
+  Tổng số lần train APC (stage multiseed): 126
