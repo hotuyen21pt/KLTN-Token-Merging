@@ -401,6 +401,13 @@ Nghĩa là `python run_all.py --stages triplet` từ repo trắng vẫn chạy �
 train ATE → infer → rồi mới eval. Tắt bằng `--no-auto-deps` nếu muốn stage báo
 lỗi thay vì tự xử lý.
 
+**`--resume` không dùng prediction ATE cũ.** `runs_ate/test_ate_predictions.csv`
+nằm trong git nên clone xong là đã có. Nếu chỉ kiểm tra "file tồn tại" thì
+`--resume` sẽ giữ file cũ kể cả khi stage `ate` vừa train checkpoint mới, và
+`apc`/`triplet` sẽ chạy trên prediction của model cũ — trong khi `multiseed`
+lại dùng `runs_ate/seed_<N>/test_predictions.csv` vừa sinh. Hai nửa báo cáo sẽ
+lệch nhau. Nên `ate_infer` so mtime: checkpoint mới hơn CSV thì sinh lại.
+
 ### 21 biến thể
 
 | Nhóm | Số lượng | Nội dung |

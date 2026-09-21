@@ -787,6 +787,16 @@ def stage_ate(ctx: Ctx) -> None:
         raise RuntimeError(f"run_multiseed_ate.py thất bại (exit {rc})")
 
 
+def _newest_mtime(path: Path) -> float:
+    """mtime mới nhất trong một thư mục (hoặc của chính file)."""
+    if path.is_file():
+        return path.stat().st_mtime
+    if not path.is_dir():
+        return 0.0
+    times = [f.stat().st_mtime for f in path.rglob("*") if f.is_file()]
+    return max(times) if times else 0.0
+
+
 def ensure_ate_checkpoint(ctx: Ctx) -> Optional[Path]:
     """Trả về checkpoint T5 ATE, tự chạy stage `ate` nếu chưa có.
 
@@ -849,10 +859,27 @@ def ensure_ate_predictions(ctx: Ctx) -> Optional[Path]:
 def stage_ate_infer(ctx: Ctx) -> None:
     """Infer ATE trên tập test → runs_ate/test_ate_predictions.csv (dùng cho mọi eval e2e)."""
     out_csv = ctx.out("runs_ate", "test_ate_predictions.csv")
+    existing_ckpt = ctx.ate_ckpt()
+
+    # runs_ate/test_ate_predictions.csv NẰM TRONG GIT (commit 17/06), nên sau khi
+    # clone là đã có sẵn.  Nếu chỉ kiểm tra "file tồn tại" thì --resume sẽ giữ
+    # nguyên file cũ kể cả khi stage `ate` vừa train ra checkpoint mới, và các
+    # stage sau (apc, triplet) sẽ chạy trên prediction của model CŨ — trong khi
+    # `multiseed` lại dùng runs_ate/seed_<N>/test_predictions.csv vừa sinh.
+    # So mtime để phát hiện đúng trường hợp đó.
     if ctx.resume and out_csv.is_file():
-        log(f"--resume: đã có {out_csv} — bỏ qua.")
-        return
-    ckpt = ensure_ate_checkpoint(ctx)
+        if existing_ckpt is None:
+            log(f"--resume: đã có {out_csv}, chưa có checkpoint — giữ nguyên.")
+            return
+        csv_t, ckpt_t = out_csv.stat().st_mtime, _newest_mtime(existing_ckpt)
+        if csv_t >= ckpt_t:
+            log(f"--resume: đã có {out_csv} (mới hơn checkpoint) — bỏ qua.")
+            return
+        age_h = (ckpt_t - csv_t) / 3600
+        log(f"--resume: checkpoint {existing_ckpt.name} mới hơn prediction "
+            f"{age_h:.1f} giờ → SINH LẠI để các stage sau không dùng file cũ.")
+
+    ckpt = existing_ckpt or ensure_ate_checkpoint(ctx)
     if ckpt is None:
         log("[bỏ qua] Không có checkpoint T5 ATE.")
         return
