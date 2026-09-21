@@ -409,11 +409,16 @@ Xem đầy đủ cờ của từng biến thể bằng `python run_all.py --list
 python run_all.py --smoke
 ```
 
-Dựng một dataset tí hon (48 train / 16 dev / 16 test, cắt từ `dataset/` giữ nguyên
-thứ tự để `test_sentences_id.csv` vẫn align theo index với `test.apc`), rồi chạy
+Dựng một dataset tí hon (72 train / 32 dev / 32 test) rồi chạy
 **toàn bộ** đường ống với 1 epoch, 1 seed, 3 biến thể phủ đủ 3 nhánh code
 (`lcf_scm_cdm` = post-ToMe resize, `lcf_scm_cdm_compact` = post-ToMe compact,
 `lcf_pre_scm` = pre-ToMe). Khoảng 5–10 phút trên GPU.
+
+Mẫu được chọn **phủ đủ 6 category × 3 sentiment**, không phải N mẫu đầu: dataset
+sắp xếp theo category nên 48 mẫu đầu chỉ có `SERVICE/Positive` — một lớp duy
+nhất, và `classification_report(target_names=...)` trong
+`run_joint_experiments.py` sẽ ném `ValueError`. Chỉ số được giữ nguyên thứ tự
+để `test_sentences_id.csv` vẫn align theo index với `test.apc`.
 
 Mọi output đi vào `smoke_run/` — **không đè lên kết quả thật**:
 

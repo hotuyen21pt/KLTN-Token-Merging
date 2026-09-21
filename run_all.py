@@ -80,7 +80,7 @@ GAS_ATE_F1_FALLBACK = 79.87  # dùng cho header bảng khi chưa chạy stage `a
 SMOKE_DIR = ROOT / "dataset_smoke"
 # Mọi output của lượt smoke đi vào đây để KHÔNG đè lên kết quả thật.
 SMOKE_OUT_ROOT = ROOT / "smoke_run"
-SMOKE_SIZES = {"train": 48, "dev": 16, "test": 16}
+SMOKE_SIZES = {"train": 72, "dev": 32, "test": 32}
 SMOKE_SUPPLEMENT_LINES = 24
 SMOKE_UOS_ROWS = 5
 # 3 biến thể phủ đủ 3 nhóm code path: post-ToMe resize / post-ToMe compact / pre-ToMe
@@ -307,9 +307,9 @@ def read_ate_f1(default: float = GAS_ATE_F1_FALLBACK,
         return default
 
 
-def _head_apc_blocks(src: Path, dst: Path, n_blocks: int) -> int:
-    """Chép n_blocks mẫu đầu tiên của file .apc (mỗi mẫu 4 dòng) sang dst."""
-    lines = [l.strip() for l in src.read_text(encoding="utf-8").splitlines()]
+def _read_apc_blocks(path: Path) -> List[List[str]]:
+    """Đọc file .apc thành danh sách mẫu, mỗi mẫu là 4 dòng."""
+    lines = [l.strip() for l in path.read_text(encoding="utf-8").splitlines()]
     blocks: List[List[str]] = []
     buf: List[str] = []
     for line in lines:
@@ -320,34 +320,85 @@ def _head_apc_blocks(src: Path, dst: Path, n_blocks: int) -> int:
         if len(buf) == 4:
             blocks.append(buf)
             buf = []
-            if len(blocks) >= n_blocks:
+    return blocks
+
+
+def _pick_indices(blocks: List[List[str]], n: int) -> List[int]:
+    """Chọn n chỉ số sao cho MỌI nhãn (category, sentiment) đều xuất hiện.
+
+    Không dùng n mẫu đầu được: dataset sắp xếp theo category nên 48 mẫu đầu chỉ
+    có SERVICE/Positive — một lớp duy nhất.  Khi đó sklearn
+    classification_report(target_names=...) trong run_joint_experiments.py ném
+    ValueError vì số lớp thấy được không khớp số target_names.
+
+    Ưu tiên tổ hợp hiếm trước, rồi rải đều phần còn lại để phân bố không lệch.
+    """
+    by_combo: Dict[tuple, List[int]] = {}
+    for i, b in enumerate(blocks):
+        by_combo.setdefault((b[2], b[3]), []).append(i)
+
+    chosen: set = set()
+    # 1 mẫu cho mỗi tổ hợp (category, sentiment), hiếm nhất trước
+    for combo in sorted(by_combo, key=lambda c: len(by_combo[c])):
+        if len(chosen) >= n:
+            break
+        chosen.add(by_combo[combo][0])
+
+    # thêm 1 mẫu nữa cho mỗi tổ hợp nếu còn chỗ (để train có >1 mẫu/lớp)
+    for combo in sorted(by_combo, key=lambda c: len(by_combo[c])):
+        if len(chosen) >= n:
+            break
+        for i in by_combo[combo][1:2]:
+            chosen.add(i)
+
+    # rải đều phần còn lại
+    remaining = [i for i in range(len(blocks)) if i not in chosen]
+    need = n - len(chosen)
+    if need > 0 and remaining:
+        step = max(1, len(remaining) // need)
+        for i in remaining[::step]:
+            if len(chosen) >= n:
                 break
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    body = "\n\n".join("\n".join(b) for b in blocks)
-    dst.write_text(body + "\n", encoding="utf-8")
-    return len(blocks)
+            chosen.add(i)
+    return sorted(chosen)
 
 
 def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
                         dst_dir: Path = SMOKE_DIR) -> Path:
     """Dựng bản dataset tí hon để kiểm tra toàn bộ đường ống chạy được.
 
-    Lấy N mẫu ĐẦU TIÊN của mỗi split (giữ nguyên thứ tự) để test_sentences_id.csv
-    vẫn align theo index với test.apc — điều kiện bắt buộc của eval e2e.
+    Lấy mẫu PHỦ NHÃN (xem _pick_indices) chứ không phải N mẫu đầu, và giữ
+    nguyên thứ tự chỉ số để test_sentences_id.csv vẫn align theo index với
+    test.apc — điều kiện bắt buộc của mọi eval end-to-end.
     """
     dst_dir.mkdir(parents=True, exist_ok=True)
     counts: Dict[str, int] = {}
-    for split, n in SMOKE_SIZES.items():
-        counts[split] = _head_apc_blocks(src_dir / f"{split}.apc",
-                                         dst_dir / f"{split}.apc", n)
+    test_idx: List[int] = []
 
-    # test_sentences_id.csv — giữ header + n_test dòng đầu (cùng thứ tự test.apc)
+    for split, n in SMOKE_SIZES.items():
+        blocks = _read_apc_blocks(src_dir / f"{split}.apc")
+        idx = _pick_indices(blocks, n)
+        if split == "test":
+            test_idx = idx
+        body = "\n\n".join("\n".join(blocks[i]) for i in idx)
+        (dst_dir / f"{split}.apc").write_text(body + "\n", encoding="utf-8")
+        counts[split] = len(idx)
+        cats = sorted({blocks[i][2] for i in idx})
+        sents = sorted({blocks[i][3] for i in idx})
+        log(f"[smoke]   {split:<5} {len(idx):3d} mẫu | {len(cats)} category | {len(sents)} sentiment")
+
+    # test_sentences_id.csv — CÙNG chỉ số với test.apc để giữ align
     gold_src = src_dir / "test_sentences_id.csv"
     if gold_src.is_file():
         with open(gold_src, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             fields = reader.fieldnames or []
-            rows = [r for _, r in zip(range(counts["test"]), reader)]
+            all_rows = list(reader)
+        keep = {i for i in test_idx}
+        rows = [r for i, r in enumerate(all_rows) if i in keep]
+        if len(rows) != counts["test"]:
+            log(f"[smoke] [CẢNH BÁO] gold csv {len(rows)} dòng vs test.apc "
+                f"{counts['test']} mẫu — eval e2e sẽ không align")
         with open(dst_dir / "test_sentences_id.csv", "w", newline="",
                   encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=fields)
@@ -364,7 +415,6 @@ def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
             (sup_dst / name).write_text(body + "\n", encoding="utf-8")
 
     log(f"[smoke] dataset tí hon → {dst_dir}")
-    log(f"[smoke]   train={counts['train']}  dev={counts['dev']}  test={counts['test']}")
     return dst_dir
 
 
@@ -1213,7 +1263,7 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
                    choices=VARIANT_GROUPS,
                    help=f"Nhóm biến thể (mặc định: tất cả = {VARIANT_GROUPS})")
     p.add_argument("--smoke", action="store_true",
-                   help="CHẠY THỬ: dựng dataset tí hon (48/16/16 mẫu), 1 epoch, "
+                   help="CHẠY THỬ: dựng dataset tí hon (72/32/32 mẫu phủ đủ nhãn), "
                         "1 seed, 3 biến thể — để kiểm tra toàn bộ đường ống chạy "
                         "được trước khi tốn GPU cho lượt đầy đủ")
     p.add_argument("--out-root", default=None, metavar="DIR",
