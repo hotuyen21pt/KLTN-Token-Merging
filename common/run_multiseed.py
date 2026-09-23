@@ -133,11 +133,11 @@ ALL_CONFIGS: List[Tuple] = [
     # (False, False, True,  True,  "sequential_local",   False, "SLM",         "seq"),
     # (False, False, True,  True,  "sequential_cosine",  False, "SCM",         "scm"),
     # # 7–12. LCF + ToMe (resize)
-    # (True,  True,  True,  True,  "bipartite",          False, "BiToMe+CDM",  "lcf_bip_cdm"),
+    (True,  True,  True,  True,  "bipartite",          False, "BiToMe+CDM",  "lcf_bip_cdm"),
     # (True,  False, True,  True,  "bipartite",          False, "BiToMe+CDW",  "lcf_bip_cdw"),
-    # (True,  True,  True,  True,  "sequential_local",   False, "SLM+CDM",     "lcf_seq_cdm"),
-    # (True,  False, True,  True,  "sequential_local",   False, "SLM+CDW",     "lcf_seq_cdw"),
-    # (True,  True,  True,  True,  "sequential_cosine",  False, "SCM+CDM",     "lcf_scm_cdm"),
+    (True,  True,  True,  True,  "sequential_local",   False, "SLM+CDM",     "lcf_seq_cdm"),
+    (True,  False, True,  True,  "sequential_local",   False, "SLM+CDW",     "lcf_seq_cdw"),
+    (True,  True,  True,  True,  "sequential_cosine",  False, "SCM+CDM",     "lcf_scm_cdm"),
     (True,  False, True,  True,  "sequential_cosine",  False, "SCM+CDW",     "lcf_scm_cdw"),
 ]
 
@@ -207,7 +207,7 @@ def set_seed(seed: int) -> None:
 
 
 def _load_encoder(model_type: str, pretrained: str):
-    if model_type == "t5":
+    if model_type in {"t5", "mt5"}:
         return T5EncoderModel.from_pretrained(pretrained)
     return AutoModel.from_pretrained(pretrained)
 
