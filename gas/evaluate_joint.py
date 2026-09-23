@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
 
 import torch
 
+from common.data_config import apply_cli_data_config
 from gas.dataset import load_split_records
 from gas.metrics import evaluate_all, format_report
 from gas.model import GasT5Model
@@ -121,9 +122,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default=str(ROOT / "dataset"),
-        help="Directory containing train.apc / dev.apc / test.apc",
+        default=None,
+        help="Directory containing train.apc / dev.apc / test.apc "
+             "(default: $KLTN_DATA_DIR -> autodetect /kaggle/input -> dataset/)",
     )
+    parser.add_argument("--train-file", type=str, default=None,
+                        help="Override path to the train .apc file")
+    parser.add_argument("--dev-file", type=str, default=None,
+                        help="Override path to the dev .apc file")
+    parser.add_argument("--test-file", type=str, default=None,
+                        help="Override path to the test .apc file")
     parser.add_argument(
         "--split",
         choices=["train", "dev", "test"],
@@ -150,6 +158,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args   = parse_args()
+    paths  = apply_cli_data_config(args)
+    args.data_dir = str(paths.data_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
 
@@ -168,7 +178,7 @@ def main() -> None:
     model = GasT5Model.from_pretrained(str(gas_ckpt), device=device)
 
     # Load evaluation data (main records only, no supplement)
-    print(f"Loading {args.split} data from: {args.data_dir}")
+    print(f"Loading {args.split} data from: {paths.split(args.split)}")
     main_records = load_split_records(args.split, args.data_dir)
     print(f"  {len(main_records)} sentences")
 

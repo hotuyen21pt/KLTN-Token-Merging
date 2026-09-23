@@ -65,6 +65,8 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from common.data_config import DataPaths, resolve_data_paths  # noqa: E402
+
 
 DEFAULT_SEEDS = [42, 123, 456]
 DEFAULT_BACKBONES = ["bert", "t5"]
@@ -363,7 +365,7 @@ def _pick_indices(blocks: List[List[str]], n: int) -> List[int]:
     return sorted(chosen)
 
 
-def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
+def build_smoke_dataset(src: Optional["DataPaths"] = None,
                         dst_dir: Path = SMOKE_DIR) -> Path:
     """Dựng bản dataset tí hon để kiểm tra toàn bộ đường ống chạy được.
 
@@ -371,12 +373,14 @@ def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
     nguyên thứ tự chỉ số để test_sentences_id.csv vẫn align theo index với
     test.apc — điều kiện bắt buộc của mọi eval end-to-end.
     """
+    src = src or resolve_data_paths()
     dst_dir.mkdir(parents=True, exist_ok=True)
     counts: Dict[str, int] = {}
     test_idx: List[int] = []
+    log(f"[smoke] nguồn: {src.data_dir}")
 
     for split, n in SMOKE_SIZES.items():
-        blocks = _read_apc_blocks(src_dir / f"{split}.apc")
+        blocks = _read_apc_blocks(src.split(split))
         idx = _pick_indices(blocks, n)
         if split == "test":
             test_idx = idx
@@ -388,7 +392,7 @@ def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
         log(f"[smoke]   {split:<5} {len(idx):3d} mẫu | {len(cats)} category | {len(sents)} sentiment")
 
     # test_sentences_id.csv — CÙNG chỉ số với test.apc để giữ align
-    gold_src = src_dir / "test_sentences_id.csv"
+    gold_src = src.gold_csv
     if gold_src.is_file():
         with open(gold_src, newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -406,7 +410,7 @@ def build_smoke_dataset(src_dir: Path = ROOT / "dataset",
             w.writerows(rows)
 
     # supplement — vài dòng đầu là đủ để nhánh USE_SUPPLEMENT chạy được
-    sup_src, sup_dst = src_dir / "supplement", dst_dir / "supplement"
+    sup_src, sup_dst = src.supplement_dir, dst_dir / "supplement"
     sup_dst.mkdir(parents=True, exist_ok=True)
     for name in ["negative.tsv", "neutral.tsv"]:
         if (sup_src / name).is_file():
@@ -431,16 +435,23 @@ def ollama_available(host: str = "http://localhost:11434") -> bool:
 # Drivers — chạy trong tiến trình con, inject hằng số rồi gọi main() của script gốc
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _inject_dataset(mod, data_dir: Path, *, supplement: bool = True) -> None:
-    """Trỏ các hằng số dataset của một module sang thư mục dữ liệu khác."""
-    mod.DATASET_DIR = data_dir
-    mod.TRAIN_APC = data_dir / "train.apc"
-    mod.DEV_APC = data_dir / "dev.apc"
-    mod.TEST_APC = data_dir / "test.apc"
+def payload_paths(p: dict) -> DataPaths:
+    """DataPaths từ payload của driver (payload cũ chỉ có data_dir vẫn chạy)."""
+    if p.get("data_paths"):
+        return DataPaths.from_dict(p["data_paths"])
+    return resolve_data_paths(data_dir=p.get("data_dir"))
+
+
+def _inject_dataset(mod, paths: DataPaths, *, supplement: bool = True) -> None:
+    """Trỏ các hằng số dataset của một module sang bộ đường dẫn đã chốt."""
+    mod.DATASET_DIR = paths.data_dir
+    mod.TRAIN_APC = paths.train
+    mod.DEV_APC = paths.dev
+    mod.TEST_APC = paths.test
     if supplement and hasattr(mod, "SUPPLEMENT_FILES"):
-        mod.SUPPLEMENT_DIR = data_dir / "supplement"
-        mod.SUPPLEMENT_FILES = [str(mod.SUPPLEMENT_DIR / "negative.tsv"),
-                                str(mod.SUPPLEMENT_DIR / "neutral.tsv")]
+        mod.SUPPLEMENT_DIR = paths.supplement_dir
+        mod.SUPPLEMENT_FILES = [str(paths.supplement_dir / "negative.tsv"),
+                                str(paths.supplement_dir / "neutral.tsv")]
 
 
 def _inject_epochs(mod, epochs) -> None:
@@ -459,7 +470,7 @@ def driver_ate_infer(p: dict) -> None:
     mod.ATE_CKPT = Path(p["ate_ckpt"])
     mod.OUT_CSV = Path(p["out_csv"])
     mod.OUT_DIR = Path(p["out_csv"]).parent
-    mod.GOLD_CSV = Path(p["data_dir"]) / "test_sentences_id.csv"
+    mod.GOLD_CSV = payload_paths(p).gold_csv
     print(f"[driver] ATE checkpoint : {mod.ATE_CKPT}")
     print(f"[driver] Gold CSV       : {mod.GOLD_CSV}")
     print(f"[driver] Output CSV     : {mod.OUT_CSV}")
@@ -479,7 +490,7 @@ def driver_triplet(p: dict) -> None:
 
     from common.dataset_utils import parse_apc_file
 
-    test_apc = Path(p["data_dir"]) / "test.apc"
+    test_apc = payload_paths(p).test
     ate_csv = Path(p["ate_csv"])
 
     gold_sents = [e["text"] for e in parse_apc_file(str(test_apc))]
@@ -534,7 +545,7 @@ def driver_apc(p: dict) -> None:
     mod.RUNS_DIR = Path(p["runs_dir"])
     mod.SEED = int(p["seed"])
     mod.CONFIGS = [tuple(c) for c in p["configs"]]
-    _inject_dataset(mod, Path(p["data_dir"]))
+    _inject_dataset(mod, payload_paths(p))
     _inject_epochs(mod, p.get("epochs"))
 
     if p.get("resume"):
@@ -573,7 +584,7 @@ def driver_multiseed(p: dict) -> None:
     mod.COMPACT_VS_RESIZE_CONFIGS = [tuple(x) for x in p["compact_vs_resize"]]
     mod.PAPER_OUR_CONFIGS = [tuple(x) for x in p["paper_our"]]
 
-    _inject_dataset(mod, Path(p["data_dir"]))
+    _inject_dataset(mod, payload_paths(p))
     _inject_epochs(mod, p.get("epochs"))
 
     print(f"[driver] Resize configs  : {[c[7] for c in all_cfgs]}")
@@ -592,7 +603,7 @@ def driver_gold(p: dict) -> None:
     mod.BERT_DIR = Path(p["runs_dir"])
     mod.OUT_DIR = Path(p["out_dir"])
     mod.PRETRAINED_MODEL = p["pretrained"]
-    _inject_dataset(mod, Path(p["data_dir"]), supplement=False)
+    _inject_dataset(mod, payload_paths(p), supplement=False)
     if p["model_type"] != "t5":
         # Script gốc hard-code T5EncoderModel; với BERT ta thay bằng AutoModel.
         mod.T5EncoderModel = AutoModel
@@ -611,11 +622,14 @@ def driver_figures(p: dict) -> None:
     mod = load_module(ROOT / "scripts" / "generate_thesis_figures.py", "_drv_figures")
     mod.FIG_DIR = Path(p["fig_dir"])
     mod.RUNS = Path(p["runs_ate"])
-    mod.DATASET = Path(p["data_dir"])
+    paths = payload_paths(p)
+    mod.DATASET = paths.data_dir
+    mod.TRAIN_APC = paths.train
     mod.FIG_DIR.mkdir(parents=True, exist_ok=True)
     print(f"[driver] Fig dir  : {mod.FIG_DIR}")
     print(f"[driver] Runs ate : {mod.RUNS}")
     print(f"[driver] Dataset  : {mod.DATASET}")
+    print(f"[driver] Train .apc: {mod.TRAIN_APC}")
     mod.main()
 
 
@@ -633,6 +647,14 @@ DRIVERS: Dict[str, Callable[[dict], None]] = {
 # Stages
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _display_path(p: Path) -> str:
+    """Đường dẫn gọn: tương đối với repo nếu nằm trong repo, còn lại giữ nguyên."""
+    try:
+        return p.relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(p)
+
+
 class Ctx:
     """Tham số dùng chung cho mọi stage."""
 
@@ -645,17 +667,30 @@ class Ctx:
         self.no_train: bool = args.no_train
         self.dry_run: bool = args.dry_run
         self.smoke: bool = args.smoke
-        self.data_dir: Path = Path(args.data_dir) if args.data_dir else ROOT / "dataset"
         self.max_epochs: Optional[int] = args.max_epochs
+
+        # Nguồn dữ liệu thật: --data-dir / --*-file → env KLTN_* → tự dò
+        # /kaggle/input → dataset/ của repo (xem common/data_config.py).
+        self.src_paths: DataPaths = resolve_data_paths(
+            data_dir=args.data_dir,
+            train=args.train_file, dev=args.dev_file, test=args.test_file,
+            gold_csv=args.gold_csv,
+        )
+        self.paths: DataPaths = self.src_paths
 
         if self.smoke:
             # Chạy thử: 1 seed, 3 biến thể phủ đủ code path, 1 epoch, data tí hon.
             self.seeds = self.seeds[:1]
             self.variants = [v for v in VARIANTS if v["ms_id"] in SMOKE_VARIANT_IDS]
             if args.data_dir is None:
-                self.data_dir = SMOKE_DIR
+                # dataset_smoke/ được dựng từ self.src_paths (có thể nằm ngoài repo).
+                self.paths = resolve_data_paths(data_dir=SMOKE_DIR, autodetect=False)
             if self.max_epochs is None:
                 self.max_epochs = 1
+
+        # Mọi tiến trình con (driver + script) kế thừa đúng cấu hình này.
+        self.paths.export_env()
+        self.data_dir: Path = self.paths.data_dir
 
         # Sandbox output: smoke ghi vào smoke_run/, lượt thật ghi thẳng vào repo.
         self.out_root: Path = (
@@ -681,6 +716,13 @@ class Ctx:
 
     def log_path(self, stage: str) -> Path:
         return self.logs_dir / f"{stage}.log"
+
+    def data_args(self) -> List[str]:
+        """Cờ dữ liệu truyền xuống script con (ngoài biến môi trường KLTN_*)."""
+        return ["--data-dir", str(self.paths.data_dir),
+                "--train-file", str(self.paths.train),
+                "--dev-file", str(self.paths.dev),
+                "--test-file", str(self.paths.test)]
 
 
 def stage_env(ctx: Ctx) -> None:
@@ -725,17 +767,21 @@ def stage_env(ctx: Ctx) -> None:
     w("")
 
     w(f"Dữ liệu (data-dir = {ctx.data_dir}):")
-    rel_data = ctx.data_dir.relative_to(ROOT).as_posix()
-    for rel in [f"{rel_data}/train.apc", f"{rel_data}/dev.apc", f"{rel_data}/test.apc",
-                f"{rel_data}/test_sentences_id.csv",
-                f"{rel_data}/supplement/negative.tsv", f"{rel_data}/supplement/neutral.tsv",
-                "results.csv"]:
-        p = ROOT / rel
+    # Dùng đường dẫn tuyệt đối đã chốt: dataset có thể nằm ngoài repo
+    # (ví dụ /kaggle/input/<ten-dataset>), không relative_to(ROOT) được.
+    data_files: List[Path] = [
+        ctx.paths.train, ctx.paths.dev, ctx.paths.test, ctx.paths.gold_csv,
+        ctx.paths.supplement_dir / "negative.tsv",
+        ctx.paths.supplement_dir / "neutral.tsv",
+        ROOT / "results.csv",
+    ]
+    for p in data_files:
+        label = _display_path(p)
         if p.is_file():
             n = sum(1 for _ in p.open(encoding="utf-8", errors="replace"))
-            w(f"  [OK]   {rel:<38} {p.stat().st_size / 1024:8.1f} KB  {n} dòng")
+            w(f"  [OK]   {label:<44} {p.stat().st_size / 1024:8.1f} KB  {n} dòng")
         else:
-            w(f"  [THIẾU] {rel}")
+            w(f"  [THIẾU] {label}")
     w("")
 
     ate = ctx.ate_ckpt()
@@ -752,6 +798,7 @@ def stage_env(ctx: Ctx) -> None:
     w("Kế hoạch:")
     w(f"  Chế độ    : {'SMOKE (chạy thử)' if ctx.smoke else 'đầy đủ'}")
     w(f"  Data dir  : {ctx.data_dir}")
+    w(f"  train/dev/test: {ctx.paths.train} | {ctx.paths.dev} | {ctx.paths.test}")
     w(f"  Max epochs: {ctx.max_epochs if ctx.max_epochs else 'theo mặc định của script'}")
     w(f"  Seeds     : {ctx.seeds}")
     w(f"  Backbones : {ctx.backbones}")
@@ -773,7 +820,7 @@ def stage_ate(ctx: Ctx) -> None:
     """Train T5 ATE (GAS) đa seed + sinh prediction CSV theo từng seed."""
     cmd = [sys.executable, "common/run_multiseed_ate.py",
            "--seeds", *[str(s) for s in ctx.seeds],
-           "--data-dir", str(ctx.data_dir),
+           *ctx.data_args(),
            "--runs-ate-dir", str(ctx.out("runs_ate")),
            "--ckpt-dir", str(ctx.out("checkpoints", "gas_t5_ate"))]
     if ctx.max_epochs:
@@ -885,7 +932,8 @@ def stage_ate_infer(ctx: Ctx) -> None:
         return
     rc = run_driver("ate_infer",
                     {"ate_ckpt": str(ckpt), "out_csv": str(out_csv),
-                     "data_dir": str(ctx.data_dir)},
+                     "data_dir": str(ctx.data_dir),
+                     "data_paths": ctx.paths.as_dict()},
                     ctx.log_path("ate_infer"), ctx.dry_run)
     if rc != 0:
         raise RuntimeError(f"ATE inference thất bại (exit {rc})")
@@ -907,6 +955,7 @@ def stage_apc(ctx: Ctx) -> None:
             "configs": [joint_tuple(v) for v in ctx.variants],
             "resume": ctx.resume,
             "data_dir": str(ctx.data_dir),
+            "data_paths": ctx.paths.as_dict(),
             "epochs": ctx.max_epochs,
         }
         rc = run_driver("apc", payload, ctx.log_path(f"apc_{bb}"), ctx.dry_run)
@@ -954,6 +1003,7 @@ def stage_multiseed(ctx: Ctx) -> None:
         "paper_our": PAPER_OUR_CONFIGS,
         "argv": argv,
         "data_dir": str(ctx.data_dir),
+        "data_paths": ctx.paths.as_dict(),
         "epochs": ctx.max_epochs,
     }
     rc = run_driver("multiseed", payload, ctx.log_path("multiseed"), ctx.dry_run)
@@ -975,6 +1025,7 @@ def stage_gold(ctx: Ctx) -> None:
             "runs_dir": str(runs_dir),
             "out_dir": str(ctx.out("runs_bert_gold", bb.upper())),
             "data_dir": str(ctx.data_dir),
+            "data_paths": ctx.paths.as_dict(),
         }
         rc = run_driver("gold", payload, ctx.log_path(f"gold_{bb}"), ctx.dry_run)
         if rc != 0:
@@ -1002,6 +1053,7 @@ def stage_triplet(ctx: Ctx) -> None:
             "ate_csv": str(ate_csv),
             "out_csv": str(ctx.out("runs_ate", f"eval_joint_triplet_{bb.upper()}.csv")),
             "data_dir": str(ctx.data_dir),
+            "data_paths": ctx.paths.as_dict(),
         }
         rc = run_driver("triplet", payload, ctx.log_path(f"triplet_{bb}"), ctx.dry_run)
         if rc != 0:
@@ -1020,7 +1072,7 @@ def stage_gas(ctx: Ctx) -> None:
         log(f"--resume: đã có {best} — bỏ qua bước train GAS.")
     else:
         cmd = [sys.executable, "gas/train_gas.py",
-               "--data-dir", str(ctx.data_dir),
+               *ctx.data_args(),
                "--output-dir", str(ckpt_root),
                "--epochs", str(ctx.max_epochs or 20),
                "--seed", str(ctx.seeds[0])]
@@ -1037,7 +1089,7 @@ def stage_gas(ctx: Ctx) -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [sys.executable, "gas/evaluate_joint.py",
            "--gas-checkpoint", str(best),
-           "--data-dir", str(ctx.data_dir),
+           *ctx.data_args(),
            "--split", "test",
            "--output-dir", str(out_dir)]
     rc = run_cmd(cmd, ctx.log_path("gas"), ctx.dry_run)
@@ -1092,7 +1144,7 @@ def stage_uos(ctx: Ctx) -> None:
     out_dir = (ctx.out("uos_output", "test") if ctx.smoke
                else ROOT / "uos" / "output" / "test")
     cmd = [sys.executable, "uos/run_llm_uos_eval.py",
-           "--data_path", str(ctx.data_dir / "test.apc"),
+           "--data_path", str(ctx.paths.test),
            "--output_dir", str(out_dir),
            "--llm_model", ctx.args.uos_model,
            "--ollama_host", host,
@@ -1115,6 +1167,7 @@ def stage_figures(ctx: Ctx) -> None:
         "fig_dir": str(fig_dir),
         "runs_ate": str(ctx.out("runs_ate")),
         "data_dir": str(ctx.data_dir),
+        "data_paths": ctx.paths.as_dict(),
     }
     rc = run_driver("figures", payload, ctx.log_path("figures"), ctx.dry_run)
     if rc != 0:
@@ -1365,7 +1418,18 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     p.add_argument("--out-root", default=None, metavar="DIR",
                    help="Thư mục gốc cho MỌI output (mặc định: repo; --smoke dùng smoke_run/)")
     p.add_argument("--data-dir", default=None, metavar="DIR",
-                   help="Thư mục dữ liệu (mặc định: dataset/; --smoke dùng dataset_smoke/)")
+                   help="Thư mục dữ liệu chứa train.apc / dev.apc / test.apc. "
+                        "Bỏ trống thì lấy theo biến môi trường KLTN_DATA_DIR, "
+                        "rồi tự dò /kaggle/input/<ten-dataset>, cuối cùng mới "
+                        "về dataset/ của repo (--smoke dùng dataset_smoke/)")
+    p.add_argument("--train-file", default=None, metavar="FILE",
+                   help="Ghi đè riêng đường dẫn tập train (mặc định <data-dir>/train.apc)")
+    p.add_argument("--dev-file", default=None, metavar="FILE",
+                   help="Ghi đè riêng đường dẫn tập dev (mặc định <data-dir>/dev.apc)")
+    p.add_argument("--test-file", default=None, metavar="FILE",
+                   help="Ghi đè riêng đường dẫn tập test (mặc định <data-dir>/test.apc)")
+    p.add_argument("--gold-csv", default=None, metavar="FILE",
+                   help="Ghi đè đường dẫn test_sentences_id.csv (gold cho eval ATE)")
     p.add_argument("--max-epochs", type=int, default=None, metavar="N",
                    help="Giới hạn số epoch cho mọi bước train (mặc định: theo từng script)")
     p.add_argument("--resume", action="store_true",
@@ -1445,7 +1509,28 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if dropped:
             log(f"[smoke] Bỏ qua stage không chuyển được sang dataset nhỏ: {dropped}")
         if not args.dry_run:
-            build_smoke_dataset(dst_dir=ctx.data_dir)
+            missing = ctx.src_paths.missing()
+            if missing:
+                log("[smoke] Không dựng được dataset tí hon — thiếu file nguồn:")
+                for m in missing:
+                    log(f"    {m}")
+                log("  Trỏ lại bằng --data-dir / --train-file / --dev-file / --test-file.")
+                return 1
+            build_smoke_dataset(src=ctx.src_paths, dst_dir=ctx.data_dir)
+    elif not args.dry_run and not args.no_train:
+        missing = ctx.paths.missing()
+        if missing:
+            log("Thiếu file dữ liệu bắt buộc:")
+            for m in missing:
+                log(f"    {m}")
+            log("")
+            log("Cấu hình đang áp dụng:")
+            log(ctx.paths.describe())
+            log("")
+            log("  Trỏ lại bằng --data-dir / --train-file / --dev-file / --test-file, "
+                "hoặc đặt biến môi trường KLTN_DATA_DIR / KLTN_TRAIN_FILE / "
+                "KLTN_DEV_FILE / KLTN_TEST_FILE.")
+            return 1
     if not todo:
         log("Không có stage nào để chạy.")
         return 0
@@ -1458,6 +1543,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         + (", ".join(v["ms_id"] for v in ctx.variants) if ctx.smoke
            else "(" + ", ".join(args.variants) + ")"))
     log(f"  Data dir  : {ctx.data_dir}")
+    log(f"  train     : {ctx.paths.train}")
+    log(f"  dev       : {ctx.paths.dev}")
+    log(f"  test      : {ctx.paths.test}")
     log(f"  Max epochs: {ctx.max_epochs if ctx.max_epochs else '(mặc định của script)'}")
     log(f"  smoke={ctx.smoke}  resume={args.resume}  no_train={args.no_train}  "
         f"dry_run={args.dry_run}")
@@ -1524,6 +1612,7 @@ def _save_status(results: List[Dict], total: float, ctx: Ctx) -> None:
         "auto_deps": not ctx.args.no_auto_deps,
         "out_root": str(ctx.out_root),
         "data_dir": str(ctx.data_dir),
+        "data_paths": ctx.paths.as_dict(),
         "max_epochs": ctx.max_epochs,
         "stages": results,
     }, ensure_ascii=False, indent=2), encoding="utf-8")

@@ -61,6 +61,11 @@ args = parser.parse_args()
 
 # ─── Resolve paths ────────────────────────────────────────────────────────────
 
+# Dataset co the nam ngoai repo (vd /kaggle/input) - lay theo data_config.
+from common.data_config import resolve_data_paths  # noqa: E402
+
+DATA        = resolve_data_paths()
+
 MODEL_TYPE  = args.model_type.lower()
 PRETRAINED  = {"bert": "bert-base-uncased", "t5": "t5-base"}[MODEL_TYPE]
 RUNS_DIR    = Path(args.runs_dir) if args.runs_dir else ROOT / ("Bert" if MODEL_TYPE == "bert" else "T5")
@@ -97,10 +102,10 @@ entity_hit_acc  = _ej.entity_hit_acc
 # ─── Load gold từ test_sentences_id.csv ──────────────────────────────────────
 
 print(f"Device : {DEVICE}")
-print(f"Loading gold từ dataset/test_sentences_id.csv …")
+print(f"Loading gold từ {DATA.gold_csv} …")
 
 gold_by_id: Dict[int, Set[Tuple[str, str, str]]] = defaultdict(set)
-with open(ROOT / "dataset" / "test_sentences_id.csv", newline="", encoding="utf-8") as f:
+with open(DATA.gold_csv, newline="", encoding="utf-8") as f:
     for row in csv.DictReader(f):
         eid = int(row["id"])
         triple = (
@@ -210,7 +215,7 @@ print(f"  ATE time   : {ate_sec:.3f}s — {total_terms} terms extracted "
 # Mỗi entity_id → gold sentence (từ test_sentences_id.csv)
 gold_sents = {row["id"]: row["sentence"]
               for row in csv.DictReader(
-                  open(ROOT / "dataset" / "test_sentences_id.csv", encoding="utf-8")
+                  open(DATA.gold_csv, encoding="utf-8")
               )}
 
 flat_pairs: List[Tuple[int, str, str]] = []   # (entity_id, sentence, term)
@@ -347,7 +352,7 @@ for run_dir in run_dirs:
     hit = entity_hit_acc(gold_by_id, pred_by_id, all_ids)
     print(f"  Hit-Acc   → {hit['hits']}/{hit['total']} entity có ≥1 triplet đúng = {hit['accuracy']}%")
 
-    oracle = _ej.oracle_metrics(model, tokenizer, ROOT / "dataset" / "test.apc", cat_map, cat_labels)
+    oracle = _ej.oracle_metrics(model, tokenizer, DATA.test, cat_map, cat_labels)
     print(f"  Oracle (gold term, upper bound) → "
           f"Cat-Acc={oracle['cat_acc']}%  Sent-Acc={oracle['sent_acc']}%  "
           f"Joint-Acc={oracle['joint_acc']}%  (n={oracle['n']})")

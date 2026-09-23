@@ -32,7 +32,12 @@ from src.inference import predict_aspects
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 ATE_CKPT  = ROOT / "checkpoints/gas_t5_ate/best"
-GOLD_CSV  = ROOT / "dataset" / "test_sentences_id.csv"
+# Mac dinh lay tu common/data_config.py: tham so -> env KLTN_* ->
+# tu do /kaggle/input -> dataset/ cua repo.  run_all.py inject de len sau.
+from common.data_config import resolve_data_paths  # noqa: E402
+
+_DATA = resolve_data_paths()
+GOLD_CSV  = _DATA.gold_csv
 OUT_DIR   = ROOT / "runs_ate"
 OUT_CSV   = OUT_DIR / "test_ate_predictions.csv"
 

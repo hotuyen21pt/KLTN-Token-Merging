@@ -15,6 +15,7 @@ if str(ROOT) not in sys.path:
 import numpy as np
 import torch
 
+from common.data_config import apply_cli_data_config
 from src.dataset import (
     DEFAULT_DATA_DIR,
     create_dataloaders,
@@ -39,9 +40,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default=str(DEFAULT_DATA_DIR),
-        help="Directory containing train.apc / dev.apc / test.apc",
+        default=None,
+        help="Directory containing train.apc / dev.apc / test.apc "
+             "(default: $KLTN_DATA_DIR -> autodetect /kaggle/input -> dataset/)",
     )
+    parser.add_argument("--train-file", type=str, default=None,
+                        help="Override path to the train .apc file")
+    parser.add_argument("--dev-file", type=str, default=None,
+                        help="Override path to the dev .apc file")
+    parser.add_argument("--test-file", type=str, default=None,
+                        help="Override path to the test .apc file")
     parser.add_argument(
         "--output-dir",
         type=str,
@@ -62,6 +70,9 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     set_seed(args.seed)
+
+    paths = apply_cli_data_config(args)
+    args.data_dir = str(paths.data_dir)
 
     print(f"Data dir   : {args.data_dir}")
     print(f"Output dir : {args.output_dir}")

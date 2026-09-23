@@ -40,6 +40,7 @@ if str(ROOT) not in sys.path:
 import numpy as np
 import torch
 
+from common.data_config import apply_cli_data_config, resolve_data_paths
 from src.dataset import (
     DEFAULT_DATA_DIR,
     create_dataloaders,
@@ -52,7 +53,7 @@ from src.metrics import evaluate_exact_match
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-DATASET_DIR = ROOT / "dataset"
+DATASET_DIR = resolve_data_paths().data_dir
 RUNS_ATE    = ROOT / "runs_ate"
 CKPT_BASE   = ROOT / "checkpoints" / "gas_t5_ate"
 
@@ -232,7 +233,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch-size", type=int, default=DEFAULT_BATCH)
     p.add_argument("--max-input-length", type=int, default=DEFAULT_MAX_IN)
     p.add_argument("--max-target-length", type=int, default=DEFAULT_MAX_TGT)
-    p.add_argument("--data-dir", default=str(DATASET_DIR))
+    p.add_argument("--data-dir", default=None,
+                   help="Thu muc du lieu (mac dinh: $KLTN_DATA_DIR -> tu do "
+                        "/kaggle/input -> dataset/)")
+    p.add_argument("--train-file", default=None, help="Ghi de duong dan train.apc")
+    p.add_argument("--dev-file", default=None, help="Ghi de duong dan dev.apc")
+    p.add_argument("--test-file", default=None, help="Ghi de duong dan test.apc")
     p.add_argument("--runs-ate-dir", default=str(RUNS_ATE),
                    help="Output dir for per-seed prediction CSVs")
     p.add_argument("--ckpt-dir", default=str(CKPT_BASE),
@@ -248,6 +254,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    paths = apply_cli_data_config(args)
+    args.data_dir = str(paths.data_dir)
     runs_ate = Path(args.runs_ate_dir)
     ckpt_base = Path(args.ckpt_dir)
     runs_ate.mkdir(parents=True, exist_ok=True)
