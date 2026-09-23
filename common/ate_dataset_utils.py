@@ -14,13 +14,8 @@ All aspect terms for the same sentence are merged into one target string:
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
 
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -28,13 +23,12 @@ from transformers import PreTrainedTokenizer, T5Tokenizer
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-# Đường dẫn dữ liệu do common/data_config.py quyết định (tham số → biến môi
-# trường KLTN_* → tự dò /kaggle/input → dataset/ của repo).
-from common.data_config import (  # noqa: E402
-    DEFAULT_DATA_DIR,
-    SPLIT_FILES,
-    resolve_split_path,
-)
+DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "dataset"
+SPLIT_FILES = {
+    "train": "train.apc",
+    "dev":   "dev.apc",
+    "test":  "test.apc",
+}
 
 
 # ─── .apc parser (ATE) ────────────────────────────────────────────────────────
@@ -142,7 +136,10 @@ def load_split_records(
     data_dir: Optional[str | Path] = None,
 ) -> List[Dict[str, object]]:
     """Load train / dev / test ATE records from the standard .apc files."""
-    apc_path = resolve_split_path(split, data_dir)
+    if split not in SPLIT_FILES:
+        raise ValueError(f"Unknown split {split!r}; expected one of {list(SPLIT_FILES)}")
+    root     = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    apc_path = root / SPLIT_FILES[split]
     if not apc_path.is_file():
         raise FileNotFoundError(f"Missing split file: {apc_path}")
     records = load_ate_records(apc_path)

@@ -108,13 +108,9 @@ if not ATE_CSV.is_file():
 
 # ─── Align câu ATE CSV theo thứ tự dòng với test.apc ─────────────────────────
 
-from common.data_config import resolve_data_paths
 from common.dataset_utils import parse_apc_file as _parse_apc
 
-# Dataset co the nam ngoai repo (vd /kaggle/input) - lay theo data_config.
-_DATA = resolve_data_paths()
-
-_gold_sents = [e["text"] for e in _parse_apc(str(_DATA.test))]
+_gold_sents = [e["text"] for e in _parse_apc(str(ROOT / "dataset" / "test.apc"))]
 
 _tmp_path = None
 with open(ATE_CSV, newline="", encoding="utf-8") as _fin:
@@ -186,7 +182,7 @@ try:
 
     # ATE predictions
     print(f"Loading ATE predictions từ {ATE_CSV} …")
-    gold_sentences_ordered = [s["text"] for s in _parse_apc(str(_DATA.test))]
+    gold_sentences_ordered = [s["text"] for s in _parse_apc(str(ROOT / "dataset" / "test.apc"))]
     ate_preds = _eval_mod.load_ate_predictions(ATE_CSV, gold_sentences_ordered)
     print(f"  {sum(len(v) for v in ate_preds.values())} predicted terms "
           f"across {len(ate_preds)} sentences")

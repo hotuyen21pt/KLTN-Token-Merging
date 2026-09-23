@@ -42,12 +42,7 @@ from models.fast_lcf_bert_multitask import FastLcfBertMultiTask
 # ─── Config ───────────────────────────────────────────────────────────────────
 
 DEVICE       = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# Mac dinh lay tu common/data_config.py: tham so -> env KLTN_* ->
-# tu do /kaggle/input -> dataset/ cua repo.  run_all.py inject de len sau.
-from common.data_config import resolve_data_paths  # noqa: E402
-
-_DATA = resolve_data_paths()
-TEST_APC     = _DATA.test
+TEST_APC     = ROOT / "dataset" / "test.apc"
 ATE_CSV      = ROOT / "runs_ate" / "test_ate_predictions.csv"
 RUNS_DIR     = ROOT / "runs_joint"
 OUT_CSV      = ROOT / "runs_ate" / "eval_joint_triplet.csv"

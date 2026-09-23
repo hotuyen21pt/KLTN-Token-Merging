@@ -24,8 +24,6 @@ ROOT = Path(__file__).resolve().parents[1]
 FIG_DIR = ROOT / "thesis" / "figures"
 RUNS = ROOT / "runs_ate"
 DATASET = ROOT / "dataset"
-# Ghi đè được (run_all.py inject) để dùng dataset ngoài repo, ví dụ /kaggle/input.
-TRAIN_APC = DATASET / "train.apc"
 
 FIG_DIR.mkdir(exist_ok=True)
 
@@ -59,7 +57,7 @@ def parse_apc_labels(apc_path: Path) -> list[tuple[str, str]]:
 
 def fig_label_distribution():
     """Bar chart: joint label counts on train set."""
-    train = TRAIN_APC
+    train = DATASET / "train.apc"
     if not train.exists():
         print(f"[skip] {train} not found")
         return

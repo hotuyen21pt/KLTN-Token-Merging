@@ -12,7 +12,6 @@ Data source: 4-line .apc files only.
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
@@ -20,19 +19,10 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from transformers import PreTrainedTokenizer, T5Tokenizer
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-# Đường dẫn dữ liệu do common/data_config.py quyết định (tham số → biến môi
-# trường KLTN_* → tự dò /kaggle/input → dataset/ của repo).
-from common.data_config import (  # noqa: E402
-    DEFAULT_DATA_DIR,
-    SPLIT_FILES,
-    resolve_split_path,
-)
+DEFAULT_DATA_DIR      = Path(__file__).resolve().parents[1] / "dataset"
+SPLIT_FILES           = {"train": "train.apc", "dev": "dev.apc", "test": "test.apc"}
 VALID_SENTIMENTS: Set[str] = {"positive", "negative", "neutral"}
 
 # Matches "(aspect_term, CATEGORY, sentiment)" — sentiment must be a fixed token.
@@ -156,7 +146,10 @@ def load_split_records(
     data_dir: Optional[str | Path] = None,
 ) -> List[Dict]:
     """Load GAS records for train / dev / test split."""
-    path = resolve_split_path(split, data_dir)
+    if split not in SPLIT_FILES:
+        raise ValueError(f"Unknown split {split!r}; expected one of {list(SPLIT_FILES)}")
+    root = Path(data_dir) if data_dir is not None else DEFAULT_DATA_DIR
+    path = root / SPLIT_FILES[split]
     if not path.is_file():
         raise FileNotFoundError(f"Missing split file: {path}")
     return load_gas_records(path)

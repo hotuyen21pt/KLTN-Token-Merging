@@ -69,15 +69,10 @@ from models.fast_lcf_bert_multitask import FastLcfBertMultiTask
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 
-# Mac dinh lay tu common/data_config.py: tham so -> env KLTN_* ->
-# tu do /kaggle/input -> dataset/ cua repo.  run_all.py inject de len sau.
-from common.data_config import resolve_data_paths  # noqa: E402
-
-_DATA = resolve_data_paths()
-DATASET_DIR    = _DATA.data_dir
-TRAIN_APC      = _DATA.train
-DEV_APC        = _DATA.dev
-TEST_APC       = _DATA.test
+DATASET_DIR    = ROOT / "dataset"
+TRAIN_APC      = DATASET_DIR / "train.apc"
+DEV_APC        = DATASET_DIR / "dev.apc"
+TEST_APC       = DATASET_DIR / "test.apc"
 SUPPLEMENT_DIR = DATASET_DIR / "supplement"
 RUNS_DIR       = ROOT / "runs_multiseed"
 

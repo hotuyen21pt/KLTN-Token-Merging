@@ -460,50 +460,9 @@ python run_all.py --out-root /tmp/thu     # đổi thư mục output gốc
 python run_all.py --data-dir dataset_alt  # đổi thư mục dữ liệu
 ```
 
-Xem thêm [Cấu hình đường dẫn dữ liệu](#cấu-hình-đường-dẫn-dữ-liệu) để trỏ
-train / dev / test ra ngoài repo (ví dụ `/kaggle/input`).
-
 Stage `results` bị bỏ qua khi smoke: `experiments/eval_results.py` hard-code
 `ROOT/"dataset"` ở module level (dòng 103, 213, 350) nên không chuyển sang dataset
 nhỏ được.
-
-### Cấu hình đường dẫn dữ liệu
-
-Toàn bộ repo lấy đường dẫn `.apc` qua một chỗ duy nhất:
-[`common/data_config.py`](common/data_config.py). Thứ tự ưu tiên:
-
-1. Cờ CLI — `--data-dir`, `--train-file`, `--dev-file`, `--test-file`, `--gold-csv`
-2. Biến môi trường — `KLTN_DATA_DIR`, `KLTN_TRAIN_FILE`, `KLTN_DEV_FILE`,
-   `KLTN_TEST_FILE`, `KLTN_GOLD_CSV`
-3. **Tự dò** — thư mục trong `/kaggle/input` có đủ `train.apc` + `dev.apc` +
-   `test.apc` (quét cả một cấp con)
-4. `dataset/` của repo
-
-```bash
-# cả 3 file trong một thư mục ngoài repo
-python run_all.py --data-dir /kaggle/input/kltn-absa
-
-# trỏ từng file (tên khác chuẩn cũng được)
-python run_all.py --train-file /data/train_v2.apc \
-                  --dev-file   /data/dev.apc \
-                  --test-file  /data/test_2024.apc
-
-# hoặc khai báo một lần bằng biến môi trường
-export KLTN_DATA_DIR=/kaggle/input/kltn-absa
-python run_all.py
-
-# xem đường dẫn đang áp dụng
-python -m common.data_config
-```
-
-`run_all.py` export bộ đường dẫn đã chốt ra biến môi trường trước khi gọi tiến
-trình con, nên mọi stage — kể cả script chạy riêng (`common/run_multiseed_ate.py`,
-`gas/train_gas.py`, `gas/evaluate_joint.py`, `src/train.py`) — dùng đúng một
-cấu hình. Thiếu file thì dừng ngay ở bước preflight kèm danh sách file thiếu,
-không train rồi mới báo lỗi.
-
-Cờ `--data-dir` truyền thẳng luôn thắng biến môi trường; `--train-file` và các
-cờ file khác chỉ ghi đè đúng split của nó, phần còn lại vẫn lấy theo `--data-dir`.
 
 ### Chạy trên Kaggle
 
@@ -514,12 +473,6 @@ Hai notebook riêng, dùng chung phần setup (cấu hình → clone/pull → c�
 |---|---|---|
 | [`notebooks/kaggle_smoke_test.ipynb`](notebooks/kaggle_smoke_test.ipynb) | Kiểm tra đường ống chạy được | 5–10 phút |
 | [`notebooks/kaggle_full_run.ipynb`](notebooks/kaggle_full_run.ipynb) | Chạy thật dữ liệu đầy đủ | ~5 phiên Kaggle |
-| [`notebooks/kaggle_run_all.ipynb`](notebooks/kaggle_run_all.ipynb) | Cả hai trong một notebook (smoke → full) | tuỳ phạm vi |
-
-Trong `kaggle_run_all.ipynb`, khai báo dữ liệu ở cell **Cấu hình**
-(`DATA_DIR` / `TRAIN_FILE` / `DEV_FILE` / `TEST_FILE`; để `None` là tự dò
-`/kaggle/input`), rồi cell **Chốt đường dẫn dữ liệu** in ra đúng 3 file sẽ dùng
-và dừng nếu thiếu — trước khi tốn GPU.
 
 **Chạy smoke trước ít nhất một lần.** Nó có cell chẩn đoán tự in log của mọi
 stage hỏng kèm danh sách exception tìm thấy — rẻ hơn nhiều so với phát hiện lỗi
@@ -578,8 +531,7 @@ Checkpoint cuối cùng → `checkpoints/gas_t5_ate/last/`
 
 | Tham số | Mặc định | Mô tả |
 |---|---|---|
-| `--data-dir` | tự dò → `dataset/` | Thư mục chứa `train.apc`, `dev.apc`, `test.apc` |
-| `--train-file` / `--dev-file` / `--test-file` | theo `--data-dir` | Ghi đè riêng từng split |
+| `--data-dir` | `dataset/` | Thư mục chứa `train.apc`, `dev.apc`, `test.apc` |
 | `--output-dir` | `checkpoints/gas_t5_ate` | Nơi lưu checkpoint |
 | `--model-name` | `t5-base` | Backbone: `t5-small` / `t5-base` / `t5-large` |
 | `--batch-size` | `16` | Batch size |
