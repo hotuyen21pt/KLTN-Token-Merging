@@ -8,13 +8,27 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
-import torch.cuda.amp as amp
 from torch.utils.data import DataLoader
 from transformers import get_linear_schedule_with_warmup
 
 from src.inference import predict_aspects_for_records
 from src.metrics import evaluate_exact_match, format_metrics
 from src.model import T5AspectExtractor
+
+
+def pick_amp_dtype() -> Optional[torch.dtype]:
+    """Chọn dtype cho autocast, hoặc None nghĩa là chạy fp32.
+
+    T5/mT5 được pre-train ở bfloat16 và activations của chúng thường vượt dải
+    biểu diễn của fp16 (tối đa 65504) -> tràn thành inf -> loss = NaN ngay từ
+    batch đầu tiên. Vì vậy chỉ bật autocast khi GPU hỗ trợ bf16 (Ampere trở
+    lên). Trên T4 / P100 (compute 7.5 và 6.0) thì buộc phải chạy fp32.
+    """
+    if not torch.cuda.is_available():
+        return None
+    if torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return None
 
 
 class ATETrainer:
@@ -63,8 +77,13 @@ class ATETrainer:
         self.history: List[Dict[str, object]] = []
         self.best_dev_f1 = -1.0
         self.best_checkpoint_dir: Optional[Path] = None
-        self.use_amp = torch.cuda.is_available()
-        self.scaler = amp.GradScaler(enabled=self.use_amp)
+        self.amp_dtype = pick_amp_dtype()
+        self.use_amp = self.amp_dtype is not None
+        # GradScaler chỉ cần thiết cho fp16; bf16 có cùng dải số mũ với fp32.
+        self.scaler = torch.amp.GradScaler(
+            "cuda", enabled=(self.amp_dtype is torch.float16)
+        )
+        print(f"[AMP] dtype = {self.amp_dtype or 'fp32 (tắt autocast)'}")
 
     def _train_epoch(self, epoch: int) -> float:
         self.model.model.train()
@@ -77,7 +96,7 @@ class ATETrainer:
             labels = batch["labels"].to(self.device)
 
             self.optimizer.zero_grad(set_to_none=True)
-            with amp.autocast(enabled=self.use_amp):
+            with torch.amp.autocast("cuda", dtype=self.amp_dtype, enabled=self.use_amp):
                 outputs = self.model.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
