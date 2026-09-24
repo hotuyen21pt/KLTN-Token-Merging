@@ -206,6 +206,21 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def _pick_amp_dtype(model_type: str):
+    """Chọn dtype cho autocast; None nghĩa là chạy fp32.
+
+    T5/mT5 được pre-train ở bfloat16 và activations của chúng thường vượt dải
+    biểu diễn của fp16 (tối đa 65504) -> tràn thành inf -> loss = NaN. Nếu GPU
+    hỗ trợ bf16 (Ampere trở lên) thì dùng bf16; còn lại (T4 compute 7.5) buộc
+    phải chạy fp32 cho backbone T5. BERT được train ở fp32 nên fp16 vẫn an toàn.
+    """
+    if not (USE_MIXED_PRECISION and DEVICE.type == "cuda"):
+        return None
+    if model_type in {"t5", "mt5"}:
+        return torch.bfloat16 if torch.cuda.is_bf16_supported() else None
+    return torch.float16
+
+
 def _load_encoder(model_type: str, pretrained: str):
     if model_type in {"t5", "mt5"}:
         return T5EncoderModel.from_pretrained(pretrained)
@@ -438,7 +453,11 @@ def train_one_seed(
     ).to(DEVICE)
 
     optimiser  = torch.optim.AdamW(model.parameters(), lr=LR)
-    scaler     = torch.amp.GradScaler("cuda", enabled=USE_MIXED_PRECISION and DEVICE.type == "cuda")
+    amp_dtype  = _pick_amp_dtype(model_type)
+    use_amp    = amp_dtype is not None
+    # GradScaler chỉ cần cho fp16; bf16 có cùng dải số mũ với fp32.
+    scaler     = torch.amp.GradScaler("cuda", enabled=(amp_dtype is torch.float16))
+    print(f"      [AMP] dtype = {amp_dtype or 'fp32 (tat autocast)'}")
     sent_crit  = nn.CrossEntropyLoss(weight=compute_sentiment_class_weights(train_ds))
     cat_crit   = nn.CrossEntropyLoss(weight=compute_category_class_weights(train_ds, aspect_cat_map))
 
@@ -454,7 +473,7 @@ def train_one_seed(
             lcf  = b["lcf_vec"].to(DEVICE)
             ys   = b["sentiment_label"].to(DEVICE)
             yc   = b["aspect_cat_label"].to(DEVICE)
-            with torch.amp.autocast("cuda", enabled=USE_MIXED_PRECISION and DEVICE.type == "cuda"):
+            with torch.amp.autocast("cuda", dtype=amp_dtype, enabled=use_amp):
                 out  = model(ids, attn, lcf)
                 sl   = sent_crit(out["sentiment_logits"], ys)
                 mm   = ~b["is_supplement"].to(DEVICE)
