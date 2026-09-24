@@ -217,7 +217,11 @@ def _pick_amp_dtype(model_type: str):
     if not (USE_MIXED_PRECISION and DEVICE.type == "cuda"):
         return None
     if model_type in {"t5", "mt5"}:
-        return torch.bfloat16 if torch.cuda.is_bf16_supported() else None
+        # torch.cuda.is_bf16_supported() trả True cả khi bf16 chỉ được EMULATE
+        # (T4 compute 7.5) nên phải xem compute capability: chỉ Ampere trở lên
+        # (>= 8) mới có bf16 chạy trên phần cứng.
+        major = torch.cuda.get_device_properties(torch.cuda.current_device()).major
+        return torch.bfloat16 if major >= 8 else None
     return torch.float16
 
 

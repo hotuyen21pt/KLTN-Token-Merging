@@ -26,9 +26,33 @@ def pick_amp_dtype() -> Optional[torch.dtype]:
     """
     if not torch.cuda.is_available():
         return None
-    if torch.cuda.is_bf16_supported():
+    # Không dùng torch.cuda.is_bf16_supported(): tham số including_emulation
+    # mặc định là True nên nó trả True cả trên T4 (compute 7.5), nơi bf16 chỉ
+    # được EMULATE bằng software — không có tensor core, chậm hơn cả fp32.
+    # Chỉ Ampere (compute >= 8) mới có bf16 chạy trên phần cứng.
+    major = torch.cuda.get_device_properties(torch.cuda.current_device()).major
+    if major >= 8:
         return torch.bfloat16
     return None
+
+
+def build_adamw(params, lr: float):
+    """Tạo AdamW không sinh tensor tạm cỡ lớn ở mỗi bước.
+
+    AdamW mặc định dùng foreach=True: mỗi bước gọi torch._foreach_sqrt trên
+    TOÀN BỘ danh sách exp_avg_sq, tạo thêm một bản bằng đúng cỡ đó. Với
+    mt5-base (582M tham số) là +2.33 GB ngay tại optimizer.step() và đủ để
+    OOM trên T4. fused=True dồn mọi phép tính vào một kernel in-place, không
+    có tensor tạm; nếu môi trường không hỗ trợ thì hạ về foreach=False.
+    """
+    params = list(params)
+    try:
+        opt = torch.optim.AdamW(params, lr=lr, fused=True)
+        print("[optim] AdamW fused=True")
+        return opt
+    except (RuntimeError, ValueError, TypeError) as exc:
+        print(f"[optim] fused AdamW không khả dụng ({exc}); dùng foreach=False")
+        return torch.optim.AdamW(params, lr=lr, foreach=False)
 
 
 class ATETrainer:
@@ -64,10 +88,7 @@ class ATETrainer:
         self.test_records = list(test_records) if test_records is not None else None
 
         self.device = model.device
-        self.optimizer = torch.optim.AdamW(
-            model.model.parameters(),
-            lr=learning_rate,
-        )
+        self.optimizer = build_adamw(model.model.parameters(), learning_rate)
         total_steps = max(1, len(train_loader) * num_epochs)
         warmup_steps = int(total_steps * warmup_ratio)
         self.scheduler = get_linear_schedule_with_warmup(
