@@ -120,7 +120,17 @@ def load_ate_records(path: str | Path) -> List[Dict[str, object]]:
 
     records: List[Dict[str, object]] = []
     for text in sorted(grouped):
-        aspects = sorted(grouped[text])
+        # Sắp theo THỨ TỰ XUẤT HIỆN trong câu, không phải thứ tự chữ cái.
+        # Trước đây dùng sorted(...) nên target của "phòng sạch, giá rẻ" là
+        # "(giá rẻ); (phòng sạch)" — buộc model seq2seq phải học sắp xếp
+        # alphabet thay vì đọc tuần tự. Với bộ dữ liệu có 34% câu nhiều
+        # aspect thì đây là gánh nặng thật. Aspect không tìm thấy trong câu
+        # xếp cuối; tie-break bằng chính chuỗi để kết quả tất định.
+        def _appearance(aspect, _text=text):
+            pos = _text.find(str(aspect))
+            return (pos if pos >= 0 else len(_text), str(aspect))
+
+        aspects = sorted(grouped[text], key=_appearance)
         records.append(
             {
                 "input_text":  text,
