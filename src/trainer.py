@@ -112,6 +112,11 @@ class ATETrainer:
         self.model.model.train()
         running_loss = 0.0
         n_batches = 0
+        # Log trong epoch: một epoch mt5-base fp32 mất ~15 phút, nếu chỉ in
+        # sau khi xong thì không phân biệt được "đang chạy" với "treo".
+        n_steps = len(self.train_loader)
+        log_every = max(1, n_steps // 10)
+        t_epoch = time.perf_counter()
 
         for batch in self.train_loader:
             input_ids = batch["input_ids"].to(self.device)
@@ -138,6 +143,15 @@ class ATETrainer:
 
             running_loss += float(loss.item())
             n_batches += 1
+
+            if n_batches % log_every == 0 or n_batches == n_steps:
+                elapsed = max(time.perf_counter() - t_epoch, 1e-6)
+                rate = n_batches / elapsed
+                remain = (n_steps - n_batches) / rate if rate > 0 else 0.0
+                print(f"    [epoch {epoch + 1}] step {n_batches}/{n_steps}"
+                      f"  loss={running_loss / n_batches:.4f}"
+                      f"  {elapsed:.0f}s  {rate:.2f} it/s"
+                      f"  còn ~{remain / 60:.1f} phút", flush=True)
 
         avg_loss = running_loss / max(n_batches, 1)
         print(f"[epoch {epoch + 1}/{self.num_epochs}] train_loss={avg_loss:.4f}")

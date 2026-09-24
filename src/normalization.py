@@ -4,29 +4,68 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Iterable, List, Sequence, Set
 
 import Levenshtein
 
 _ASPECT_PATTERN = re.compile(r"\(([^)]*)\)")
+# Từ = chuỗi ký tự chữ/số, cho phép dấu nháy bên trong ("restaurant's").
+_WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
+
+
+def trim_punctuation(text: str) -> str:
+    """Cắt dấu câu ở HAI ĐẦU, giữ nguyên dấu bên trong.
+
+    Giữ nguyên bên trong là bắt buộc: "restaurant's space" hay "Wi-Fi" phải
+    còn nguyên, chỉ bỏ phần dính vào rìa như "bathroom," hay "(bữa ăn".
+    """
+    s = text.strip()
+    while s and unicodedata.category(s[0]).startswith("P"):
+        s = s[1:]
+    while s and unicodedata.category(s[-1]).startswith("P"):
+        s = s[:-1]
+    return s.strip()
 
 
 def build_ngram_vocabulary(sentence: str) -> Set[str]:
-    """Build candidate vocabulary V from all word n-grams in the sentence."""
-    words = sentence.split()
+    """Build candidate vocabulary V from all word n-grams in the sentence.
+
+    Gồm ba nguồn, và hai nguồn sau là bắt buộc để gold có thể khớp lại được:
+
+    1. n-gram tách bằng khoảng trắng (bản gốc).
+    2. Bản đã cắt dấu câu ở hai đầu của từng n-gram. Nếu thiếu, câu chứa
+       "a clean pool, nice" sẽ chỉ sinh ra "pool," chứ không có "pool", nên
+       aspect gold "pool" bị Levenshtein ánh xạ sang "pool," và mất điểm —
+       đo được là mất 14-16% F1, tức trần cứng mà model không thể vượt.
+    3. n-gram theo biên từ, lấy nguyên văn theo offset. Giúp tách "staff"
+       ra khỏi token "staff...anywhere" mà vẫn giữ đúng dạng bề mặt.
+    """
     candidates: Set[str] = set()
-    n = len(words)
-    for start in range(n):
-        for end in range(start + 1, n + 1):
+
+    words = sentence.split()
+    for start in range(len(words)):
+        for end in range(start + 1, len(words) + 1):
             span = " ".join(words[start:end])
             if span:
                 candidates.add(span)
+                trimmed = trim_punctuation(span)
+                if trimmed:
+                    candidates.add(trimmed)
+
+    spans = [(m.start(), m.end()) for m in _WORD_PATTERN.finditer(sentence)]
+    for i in range(len(spans)):
+        for j in range(i, len(spans)):
+            seg = sentence[spans[i][0]:spans[j][1]]
+            if seg:
+                candidates.add(seg)
+
     return candidates
 
 
 def normalize_aspect(term: str, vocabulary: Set[str]) -> str:
     """Map an aspect to the closest n-gram in V (identity if already present)."""
-    cleaned = term.strip()
+    cleaned = trim_punctuation(term)
     if not cleaned or not vocabulary:
         return cleaned
     if cleaned in vocabulary:
@@ -34,7 +73,14 @@ def normalize_aspect(term: str, vocabulary: Set[str]) -> str:
 
     best = cleaned
     best_dist = None
-    for candidate in vocabulary:
+    # Duyệt theo thứ tự đã sắp: kết quả không phụ thuộc thứ tự băm của set,
+    # nên hai lần chạy cho ra cùng một đáp án.
+    for candidate in sorted(vocabulary):
+        # Levenshtein >= chênh lệch độ dài, nên ứng viên có chênh lệch >=
+        # khoảng cách tốt nhất hiện tại không thể tốt hơn. Bỏ qua cho nhanh,
+        # kết quả không đổi.
+        if best_dist is not None and abs(len(candidate) - len(cleaned)) >= best_dist:
+            continue
         dist = Levenshtein.distance(cleaned, candidate)
         if best_dist is None or dist < best_dist:
             best_dist = dist
