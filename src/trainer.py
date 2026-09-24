@@ -195,7 +195,12 @@ class ATETrainer:
                     print(f"Saved best checkpoint to {best_dir} (dev F1={dev_f1:.4f})")
             else:
                 no_improve += 1
-                if self.patience > 0 and no_improve >= self.patience:
+                # Không dừng sớm khi model còn chưa đạt F1 > 0 lần nào: giai
+                # đoạn warmup của mT5 có thể mất vài epoch mới sinh ra output
+                # đúng định dạng "(aspect)", trong lúc đó F1 đứng yên ở 0 và
+                # patience sẽ cắt nhầm.
+                if (self.patience > 0 and self.best_dev_f1 > 0
+                        and no_improve >= self.patience):
                     print(f"Early stopping ở epoch {epoch + 1} "
                           f"(dev F1 không cải thiện {no_improve} epoch liên tiếp, "
                           f"tốt nhất = {self.best_dev_f1:.4f})")
