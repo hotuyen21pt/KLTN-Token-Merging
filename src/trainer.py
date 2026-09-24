@@ -45,6 +45,7 @@ class ATETrainer:
         num_epochs: int = 20,
         warmup_ratio: float = 0.1,
         max_grad_norm: float = 1.0,
+        patience: int = 4,
         output_dir: Optional[str | Path] = None,
         dev_records: Optional[Sequence[Dict[str, object]]] = None,
         test_records: Optional[Sequence[Dict[str, object]]] = None,
@@ -57,6 +58,7 @@ class ATETrainer:
         self.num_epochs = num_epochs
         self.warmup_ratio = warmup_ratio
         self.max_grad_norm = max_grad_norm
+        self.patience = patience
         self.output_dir = Path(output_dir) if output_dir else None
         self.dev_records = list(dev_records) if dev_records is not None else None
         self.test_records = list(test_records) if test_records is not None else None
@@ -130,11 +132,18 @@ class ATETrainer:
         print(f"[{split_name}] {format_metrics(metrics)}")
         return metrics
 
-    def train(self) -> Dict[str, object]:
+    def train(self, *, eval_test: bool = True) -> Dict[str, object]:
+        """Huấn luyện ATE.
+
+        ``eval_test=False`` bỏ qua vòng đánh giá test ở cuối — dùng khi phía
+        gọi (run_multiseed_ate) tự đánh giá lại trên best checkpoint, tránh
+        chạy hai lần trên cùng tập test.
+        """
         if self.output_dir is not None:
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         t0 = time.perf_counter()
+        no_improve = 0
         for epoch in range(self.num_epochs):
             train_loss = self._train_epoch(epoch)
 
@@ -152,13 +161,24 @@ class ATETrainer:
             }
             self.history.append(epoch_info)
 
+            # Chỉ lưu khi thật sự tốt hơn. Trước đây dùng >= nên khi dev F1
+            # đứng yên (kể cả 0.0) vẫn ghi lại toàn bộ model mỗi epoch.
             dev_f1 = float(dev_metrics.get("f1", -1.0))
-            if self.output_dir is not None and dev_f1 >= self.best_dev_f1:
+            if dev_f1 > self.best_dev_f1 + 1e-6:
                 self.best_dev_f1 = dev_f1
-                best_dir = self.output_dir / "best"
-                self.model.save(str(best_dir))
-                self.best_checkpoint_dir = best_dir
-                print(f"Saved best checkpoint to {best_dir} (dev F1={dev_f1:.4f})")
+                no_improve = 0
+                if self.output_dir is not None:
+                    best_dir = self.output_dir / "best"
+                    self.model.save(str(best_dir))
+                    self.best_checkpoint_dir = best_dir
+                    print(f"Saved best checkpoint to {best_dir} (dev F1={dev_f1:.4f})")
+            else:
+                no_improve += 1
+                if self.patience > 0 and no_improve >= self.patience:
+                    print(f"Early stopping ở epoch {epoch + 1} "
+                          f"(dev F1 không cải thiện {no_improve} epoch liên tiếp, "
+                          f"tốt nhất = {self.best_dev_f1:.4f})")
+                    break
 
         if self.output_dir is not None:
             final_dir = self.output_dir / "last"
@@ -166,7 +186,7 @@ class ATETrainer:
             print(f"Saved final checkpoint to {final_dir}")
 
         test_metrics: Dict[str, float] = {}
-        if self.test_records is not None:
+        if eval_test and self.test_records is not None:
             ckpt = self.best_checkpoint_dir or (self.output_dir / "last" if self.output_dir else None)
             if ckpt is not None and ckpt.is_dir():
                 eval_model = T5AspectExtractor.from_pretrained(str(ckpt), device=self.device)

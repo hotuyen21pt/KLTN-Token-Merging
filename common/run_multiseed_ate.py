@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gc
 import json
 import random
 import sys
@@ -88,6 +89,7 @@ def train_one_seed_ate(
     ckpt_dir: Path,
     pred_csv: Path,
     skip_if_exists: bool = False,
+    patience: int = 4,
 ) -> Optional[Dict]:
     """Train ATE for one seed; return metrics dict."""
     meta_path = ckpt_dir / "meta.json"
@@ -122,8 +124,11 @@ def train_one_seed_ate(
         output_dir=str(ckpt_dir),
         dev_records=dev_records,
         test_records=test_records,
+        patience=patience,
     )
-    result = trainer.train()
+    # eval_test=False: khối bên dưới tự đánh giá lại trên best checkpoint,
+    # nên không cần chạy tập test hai lần.
+    result = trainer.train(eval_test=False)
 
     tm = result.get("test_metrics", {})
     metrics = {
@@ -137,14 +142,19 @@ def train_one_seed_ate(
         "wall_time_sec":   result.get("wall_time_sec", 0.0),
         "best_checkpoint": result.get("best_checkpoint", ""),
     }
-    print(f"    Test P/R/F1 = {metrics['test_precision']:.4f} / "
-          f"{metrics['test_recall']:.4f} / {metrics['test_f1']:.4f}")
-
     # ── Load best checkpoint and generate test predictions ─────────────────────
     best_ckpt = result.get("best_checkpoint") or str(ckpt_dir / "last")
     if Path(best_ckpt).is_dir():
+        # Trả VRAM của model đang train + optimizer states trước khi nạp
+        # checkpoint, nếu không sẽ có hai model cùng nằm trên GPU.
+        train_device = model.device
+        model.model.to("cpu")
+        del trainer
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         eval_model = T5AspectExtractor.from_pretrained(
-            best_ckpt, device=model.device
+            best_ckpt, device=train_device
         )
     else:
         eval_model = model
@@ -237,6 +247,9 @@ def parse_args() -> argparse.Namespace:
                    help="Output dir for per-seed prediction CSVs")
     p.add_argument("--ckpt-dir", default=str(CKPT_BASE),
                    help="Base checkpoint dir (seed subdirs created here)")
+    p.add_argument("--patience", type=int, default=4,
+                   help="Dừng sớm khi dev F1 không cải thiện sau N epoch "
+                        "(0 = tắt early stopping). Mặc định: 4")
     p.add_argument("--resume", action="store_true",
                    help="Skip seeds that already have pred CSV + meta.json")
     p.add_argument("--no-train", action="store_true",
@@ -257,6 +270,7 @@ def main() -> None:
     print(f"Model      : {args.model_name}")
     print(f"Seeds      : {args.seeds}")
     print(f"Epochs     : {args.epochs}   LR: {args.lr}   Batch: {args.batch_size}")
+    print(f"Patience   : {args.patience}" + ("" if args.patience > 0 else "  (tắt early stopping)"))
     print(f"ATE CSVs → : {runs_ate}/seed_<N>/test_predictions.csv")
     print(f"Checkpoints: {ckpt_base}/seed_<N>/")
     print()
@@ -292,6 +306,7 @@ def main() -> None:
             ckpt_dir=ckpt_dir,
             pred_csv=pred_csv,
             skip_if_exists=args.resume,
+            patience=args.patience,
         )
         if m:
             per_seed_metrics.append(m)
