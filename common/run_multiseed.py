@@ -34,8 +34,8 @@ Outputs (under runs_multiseed/):
 from __future__ import annotations
 
 import argparse
-import copy
 import csv
+import gc
 import json
 import os
 import random
@@ -461,7 +461,7 @@ def train_one_seed(
                 cl   = (cat_crit(out["aspect_cat_logits"][mm], yc[mm])
                         if mm.any() else torch.tensor(0.0, device=DEVICE))
                 loss = sl + cl
-            optimiser.zero_grad(); scaler.scale(loss).backward()
+            optimiser.zero_grad(set_to_none=True); scaler.scale(loss).backward()
             scaler.step(optimiser); scaler.update()
             total_loss += loss.item()
         avg_loss = total_loss / max(len(train_loader), 1)
@@ -472,7 +472,10 @@ def train_one_seed(
               f"  dev_cat={dev_m['aspect_cat_f1']:.1f}%")
         if jf1 > best_dev_f1 + 1e-2:
             best_dev_f1 = jf1; best_epoch = epoch; no_improve = 0
-            best_state  = copy.deepcopy(model.state_dict())
+            # Giữ best checkpoint trên CPU: tránh chiếm thêm một bản model
+            # trên GPU (với mt5 encoder là ~1.1 GB) suốt quá trình train.
+            best_state  = {k: v.detach().to("cpu", copy=True)
+                           for k, v in model.state_dict().items()}
             torch.save(best_state, ckpt_dir / "best_model.pt")
         else:
             no_improve += 1
@@ -1054,6 +1057,11 @@ def main() -> None:
                         skip_if_exists=args.resume,
                     )
                     elapsed = time.perf_counter() - t_start
+
+                    # Trả VRAM về trước khi dựng model của run kế tiếp.
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
 
                     if result is None:
                         print(f"    [warn] No result for {short_id}/seed={seed}")
