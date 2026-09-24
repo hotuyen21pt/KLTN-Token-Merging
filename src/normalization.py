@@ -20,7 +20,8 @@ def trim_punctuation(text: str) -> str:
     Giữ nguyên bên trong là bắt buộc: "restaurant's space" hay "Wi-Fi" phải
     còn nguyên, chỉ bỏ phần dính vào rìa như "bathroom," hay "(bữa ăn".
     """
-    s = text.strip()
+    s = unicodedata.normalize("NFC", text)
+    s = " ".join(s.split())
     while s and unicodedata.category(s[0]).startswith("P"):
         s = s[1:]
     while s and unicodedata.category(s[-1]).startswith("P"):
@@ -41,6 +42,7 @@ def build_ngram_vocabulary(sentence: str) -> Set[str]:
     3. n-gram theo biên từ, lấy nguyên văn theo offset. Giúp tách "staff"
        ra khỏi token "staff...anywhere" mà vẫn giữ đúng dạng bề mặt.
     """
+    sentence = unicodedata.normalize("NFC", sentence)
     candidates: Set[str] = set()
 
     words = sentence.split()
@@ -90,6 +92,7 @@ def normalize_aspect(term: str, vocabulary: Set[str]) -> str:
 
 def normalize_aspects(aspects: Sequence[str], sentence: str) -> List[str]:
     """Normalize each predicted aspect against sentence n-grams."""
+    sentence = unicodedata.normalize("NFC", sentence)
     vocab = build_ngram_vocabulary(sentence)
     return [normalize_aspect(a, vocab) for a in aspects if a and a.strip()]
 

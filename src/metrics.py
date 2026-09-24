@@ -3,11 +3,19 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 
+def _canonical_term(text: str) -> str:
+    """Canonical form for evaluation without changing reported surface text."""
+    text = unicodedata.normalize("NFC", str(text))
+    text = " ".join(text.split()).strip().casefold()
+    return text.replace(".", "")
+
+
 def _as_set(items: Sequence[str]) -> set[str]:
-    return {x.strip() for x in items if x and x.strip()}
+    return {_canonical_term(x) for x in items if x and _canonical_term(x)}
 
 
 def sentence_exact_match_counts(
