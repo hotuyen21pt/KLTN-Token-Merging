@@ -7,11 +7,24 @@ import re
 import unicodedata
 from typing import Iterable, List, Sequence, Set
 
-import Levenshtein
-
 _ASPECT_PATTERN = re.compile(r"\(([^)]*)\)")
 # Từ = chuỗi ký tự chữ/số, cho phép dấu nháy bên trong ("restaurant's").
 _WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
+
+
+def levenshtein_distance(left: str, right: str) -> int:
+    """Return the edit distance between two strings without external packages."""
+    previous = list(range(len(right) + 1))
+    for row, left_char in enumerate(left, 1):
+        current = [row]
+        for column, right_char in enumerate(right, 1):
+            current.append(min(
+                current[-1] + 1,
+                previous[column] + 1,
+                previous[column - 1] + (left_char != right_char),
+            ))
+        previous = current
+    return previous[-1]
 
 
 def trim_punctuation(text: str) -> str:
@@ -83,7 +96,7 @@ def normalize_aspect(term: str, vocabulary: Set[str]) -> str:
         # kết quả không đổi.
         if best_dist is not None and abs(len(candidate) - len(cleaned)) >= best_dist:
             continue
-        dist = Levenshtein.distance(cleaned, candidate)
+        dist = levenshtein_distance(cleaned, candidate)
         if best_dist is None or dist < best_dist:
             best_dist = dist
             best = candidate
