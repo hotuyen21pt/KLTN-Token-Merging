@@ -473,7 +473,7 @@ def train_one_seed(
         if jf1 > best_dev_f1 + 1e-2:
             best_dev_f1 = jf1; best_epoch = epoch; no_improve = 0
             # Giữ best checkpoint trên CPU: tránh chiếm thêm một bản model
-            # trên GPU (với mt5 encoder là ~1.1 GB) suốt quá trình train.
+            # trên GPU suốt quá trình train.
             best_state  = {k: v.detach().to("cpu", copy=True)
                            for k, v in model.state_dict().items()}
             torch.save(best_state, ckpt_dir / "best_model.pt")
