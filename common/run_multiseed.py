@@ -53,7 +53,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from transformers import AutoModel, T5EncoderModel, AutoTokenizer
+from transformers import (AutoConfig, AutoModel, AutoTokenizer,
+                          MT5EncoderModel, T5EncoderModel)
 from sklearn.metrics import (
     f1_score, accuracy_score, precision_score, recall_score,
 )
@@ -226,8 +227,24 @@ def _pick_amp_dtype(model_type: str):
 
 
 def _load_encoder(model_type: str, pretrained: str):
+    """Nạp encoder theo ĐÚNG lớp mà config.json khai báo.
+
+    ``T5EncoderModel`` có ``config_class = T5Config`` nên nạp một checkpoint
+    mt5 bằng nó sinh cảnh báo "You are using a model of type mt5 to
+    instantiate a model of type t5". Với mt5-base thì mọi trường kiến trúc
+    đều nằm sẵn trong config.json và hai lớp có cùng default cho phần còn
+    lại, nên trọng số vẫn đúng — nhưng dựa vào sự trùng hợp đó là mong manh:
+    chỉ cần một biến thể mT5 đặt khác default của T5Config là lệch lặng lẽ.
+
+    Phân nhánh theo ``config.model_type`` chứ không theo khoá trong
+    MODEL_REGISTRY, vì khoá đó do người dùng tự đặt và có thể không khớp
+    checkpoint thật.
+    """
     if model_type in {"t5", "mt5"}:
-        return T5EncoderModel.from_pretrained(pretrained)
+        cfg_type = getattr(AutoConfig.from_pretrained(pretrained), "model_type", "")
+        cls = MT5EncoderModel if cfg_type == "mt5" else T5EncoderModel
+        print(f"  [encoder] {cls.__name__} <- config.model_type={cfg_type!r}")
+        return cls.from_pretrained(pretrained)
     return AutoModel.from_pretrained(pretrained)
 
 
