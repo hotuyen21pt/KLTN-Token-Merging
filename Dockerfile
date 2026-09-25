@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Build tools for any packages without prebuilt wheels (e.g. Levenshtein).
+# Build tools for any packages without prebuilt wheels.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*

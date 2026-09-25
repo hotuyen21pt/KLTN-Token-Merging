@@ -44,6 +44,7 @@ __all__ = [
 def create_dataloaders(
     data_dir: Optional[str | Path] = None,
     tokenizer: Optional[PreTrainedTokenizer] = None,
+    model_name: Optional[str] = None,
     batch_size: int = 16,
     max_input_length: int = 128,
     max_target_length: int = 64,
@@ -53,6 +54,7 @@ def create_dataloaders(
     return create_ate_dataloaders(
         data_dir=data_dir,
         tokenizer=tokenizer,
+        model_name=model_name,
         batch_size=batch_size,
         max_input_length=max_input_length,
         max_target_length=max_target_length,

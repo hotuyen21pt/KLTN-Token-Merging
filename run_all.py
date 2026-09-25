@@ -703,7 +703,7 @@ def stage_env(ctx: Ctx) -> None:
     w("")
 
     for pkg in ["torch", "transformers", "sklearn", "numpy", "pandas",
-                "matplotlib", "seaborn", "Levenshtein", "fastapi", "tqdm"]:
+                "matplotlib", "seaborn", "fastapi", "tqdm"]:
         try:
             m = __import__(pkg)
             w(f"  {pkg:<14}: {getattr(m, '__version__', 'n/a')}")
@@ -827,8 +827,7 @@ def ensure_ate_checkpoint(ctx: Ctx) -> Optional[Path]:
         raise RuntimeError(
             "Stage `ate` đã chạy nhưng vẫn không sinh được checkpoint T5 ATE.\n"
             f"  Xem log: {ctx.log_path('ate')}\n"
-            "  Lỗi hay gặp: thiếu `Levenshtein` (src/normalization.py import nó) "
-            "→ `pip install python-Levenshtein`"
+            "  Lỗi hay gặp: hết VRAM hoặc sai đường dẫn dataset — xem cuối log."
         )
     log(f"[phụ thuộc] OK — checkpoint: {ckpt}")
     return ckpt

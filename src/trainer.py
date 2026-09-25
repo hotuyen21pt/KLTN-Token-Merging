@@ -100,6 +100,7 @@ class ATETrainer:
         self.history: List[Dict[str, object]] = []
         self.best_dev_f1 = -1.0
         self.best_checkpoint_dir: Optional[Path] = None
+        self._check_tokenizer_matches_model()
         self.amp_dtype = pick_amp_dtype()
         self.use_amp = self.amp_dtype is not None
         # GradScaler chỉ cần thiết cho fp16; bf16 có cùng dải số mũ với fp32.
@@ -107,6 +108,47 @@ class ATETrainer:
             "cuda", enabled=(self.amp_dtype is torch.float16)
         )
         print(f"[AMP] dtype = {self.amp_dtype or 'fp32 (tắt autocast)'}")
+
+    def _check_tokenizer_matches_model(self) -> None:
+        """Chặn trường hợp tokenizer không thuộc về checkpoint đang train.
+
+        Đây là lỗi im lặng đắt nhất của pipeline ATE: mã hoá dữ liệu bằng
+        vocab 32k tiếng Anh của t5-base rồi đưa vào mT5 (vocab 250k). Không
+        có exception nào nổ ra — id vẫn nằm trong dải hợp lệ, chỉ là trỏ sai
+        hàng embedding — nên model train đủ 20 epoch rồi trả về
+        P = R = F1 = 0.0000. Kiểm tra ở đây để hỏng là hỏng ngay từ giây đầu.
+        """
+        tok = self.model.tokenizer
+        emb_rows = self.model.model.get_input_embeddings().weight.shape[0]
+        n_tok = len(tok)
+        name = getattr(tok, "name_or_path", "?")
+        if n_tok > emb_rows:
+            raise ValueError(
+                f"Tokenizer {name!r} có {n_tok} token nhưng embedding của model "
+                f"chỉ có {emb_rows} hàng — id sẽ vượt dải và crash trên CUDA."
+            )
+        if emb_rows - n_tok > 1000:
+            raise ValueError(
+                f"Tokenizer {name!r} ({n_tok} token) không khớp model "
+                f"({emb_rows} hàng embedding). Gần như chắc chắn đang dùng "
+                f"tokenizer của model khác — hãy truyền `model_name` vào "
+                f"create_dataloaders(). Đây chính là nguyên nhân P/R/F1 = 0."
+            )
+        print(f"[tokenizer] {name}  vocab={n_tok}  embedding={emb_rows}")
+
+        # Cảnh báo phủ ngôn ngữ: tokenizer đúng model nhưng sai ngôn ngữ thì
+        # câu biến thành một dãy <unk> và F1 cũng về 0.
+        unk_id = getattr(tok, "unk_token_id", None)
+        if unk_id is not None and self.dev_records:
+            sample = [str(r["input_text"]) for r in self.dev_records[:100]]
+            ids = tok(sample, truncation=True, max_length=128)["input_ids"]
+            total = sum(len(x) for x in ids)
+            unk = sum(t == unk_id for x in ids for t in x)
+            ratio = unk / max(total, 1)
+            print(f"[tokenizer] tỉ lệ <unk> trên 100 câu dev: {ratio * 100:.2f}%")
+            if ratio > 0.05:
+                print(f"[tokenizer][CẢNH BÁO] {ratio * 100:.1f}% token là <unk> — "
+                      f"tokenizer không phủ được ngôn ngữ của dữ liệu.")
 
     def _train_epoch(self, epoch: int) -> float:
         self.model.model.train()

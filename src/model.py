@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
-from transformers import T5ForConditionalGeneration, T5Tokenizer
+from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
 DEFAULT_MODEL_NAME = "t5-base"
@@ -21,7 +21,13 @@ class GenerationConfig:
 
 
 class T5AspectExtractor:
-    """Load T5-base and expose training / generation helpers."""
+    """Nạp checkpoint seq2seq (T5 / mT5) và cung cấp helper train / generate.
+
+    Dùng ``AutoTokenizer`` + ``AutoModelForSeq2SeqLM`` thay vì cặp lớp T5
+    cứng: mT5 có lớp model và lớp tokenizer riêng, còn snapshot mount sẵn
+    trên Kaggle có thể chỉ kèm ``tokenizer.json`` chứ không có
+    ``spiece.model``. Cặp Auto tự chọn đúng lớp theo config.json.
+    """
 
     def __init__(
         self,
@@ -34,8 +40,8 @@ class T5AspectExtractor:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         self.generation = generation or GenerationConfig()
-        self.tokenizer = T5Tokenizer.from_pretrained(model_name)
-        self.model = T5ForConditionalGeneration.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
         self.model.to(self.device)
 
     @property
@@ -59,8 +65,8 @@ class T5AspectExtractor:
             "cuda" if torch.cuda.is_available() else "cpu"
         )
         obj.generation = generation or GenerationConfig()
-        obj.tokenizer = T5Tokenizer.from_pretrained(model_dir)
-        obj.model = T5ForConditionalGeneration.from_pretrained(model_dir)
+        obj.tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        obj.model = AutoModelForSeq2SeqLM.from_pretrained(model_dir)
         obj.model.to(obj.device)
         obj.model.eval()
         return obj

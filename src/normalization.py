@@ -13,7 +13,24 @@ _WORD_PATTERN = re.compile(r"[^\W_]+(?:['’][^\W_]+)*", re.UNICODE)
 
 
 def levenshtein_distance(left: str, right: str) -> int:
-    """Return the edit distance between two strings without external packages."""
+    """Khoảng cách soạn thảo giữa hai chuỗi, không cần gói ngoài.
+
+    Cùng định nghĩa với ``Levenshtein.distance`` của gói ``python-Levenshtein``
+    mà repo dùng trước đây: chi phí 1 cho chèn / xoá / thay thế, KHÔNG tính
+    hoán vị (Damerau). Bỏ gói ngoài vì Kaggle chạy offline không pip install
+    được, và đây là chỗ duy nhất repo cần tới nó.
+
+    Quy hoạch động hai hàng: ``previous`` là hàng i-1, ``current`` là hàng i,
+    nên bộ nhớ là O(len(right)) thay vì O(len(left) * len(right)).
+    """
+    if left == right:
+        return 0
+    # Đối xứng, nên đổi chỗ để hàng DP luôn là chuỗi ngắn hơn.
+    if len(right) > len(left):
+        left, right = right, left
+    if not right:
+        return len(left)
+
     previous = list(range(len(right) + 1))
     for row, left_char in enumerate(left, 1):
         current = [row]

@@ -100,8 +100,12 @@ def train_one_seed_ate(
     set_seed(seed)
     print(f"\n  Seed {seed} — training {model_name} for {epochs} epochs")
 
+    # model_name là BẮT BUỘC: dữ liệu phải được mã hoá bằng đúng tokenizer của
+    # checkpoint sắp train. Thiếu nó, mT5 (vocab 250k) nhận id sinh bởi vocab
+    # 32k tiếng Anh của t5-base → P/R/F1 = 0.
     train_loader, dev_loader, test_loader, tokenizer = create_dataloaders(
         data_dir=data_dir,
+        model_name=model_name,
         batch_size=batch_size,
         max_input_length=max_input_length,
         max_target_length=max_target_length,

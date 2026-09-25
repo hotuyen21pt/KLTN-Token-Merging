@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.utils.data import DataLoader, Dataset
-from transformers import PreTrainedTokenizer, T5Tokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizer
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -211,8 +211,20 @@ class ATEDataset(Dataset):
 
 # ─── Tokenizer helper ─────────────────────────────────────────────────────────
 
-def build_tokenizer(model_name: str = "t5-base") -> T5Tokenizer:
-    return T5Tokenizer.from_pretrained(model_name)
+def build_tokenizer(model_name: str) -> PreTrainedTokenizer:
+    """Nạp tokenizer ĐÚNG của checkpoint đang train.
+
+    ``model_name`` là bắt buộc. Trước đây tham số này mặc định là "t5-base",
+    nên khi train mT5 mà phía gọi quên truyền vào thì toàn bộ dữ liệu được
+    mã hoá bằng vocab tiếng Anh 32k của t5-base trong khi model là mT5 vocab
+    250k: id trỏ sai hàng embedding, chữ tiếng Việt thành ``<unk>``, và
+    P/R/F1 ra đúng 0. Không đặt default để lỗi đó không thể lặp lại.
+
+    Dùng ``AutoTokenizer`` thay cho ``T5Tokenizer``: mT5 cần lớp tokenizer
+    riêng, và snapshot trên Kaggle có thể chỉ có ``tokenizer.json`` (fast)
+    mà không có ``spiece.model`` mà tokenizer chậm đòi hỏi.
+    """
+    return AutoTokenizer.from_pretrained(model_name)
 
 
 # ─── DataLoader builder ───────────────────────────────────────────────────────
@@ -220,6 +232,7 @@ def build_tokenizer(model_name: str = "t5-base") -> T5Tokenizer:
 def create_ate_dataloaders(
     data_dir: Optional[str | Path] = None,
     tokenizer: Optional[PreTrainedTokenizer] = None,
+    model_name: Optional[str] = None,
     batch_size: int = 16,
     max_input_length: int = 128,
     max_target_length: int = 64,
@@ -230,7 +243,17 @@ def create_ate_dataloaders(
     Returns:
         (train_loader, dev_loader, test_loader, tokenizer)
     """
-    tok = tokenizer or build_tokenizer()
+    if tokenizer is None:
+        if model_name is None:
+            raise ValueError(
+                "create_ate_dataloaders cần `tokenizer` hoặc `model_name`. "
+                "Không có default: mã hoá dữ liệu bằng tokenizer khác với "
+                "checkpoint đang train làm P/R/F1 ra 0."
+            )
+        tokenizer = build_tokenizer(model_name)
+    tok = tokenizer
+    print(f"[ATE] tokenizer: {getattr(tok, 'name_or_path', '?')}  "
+          f"(vocab {len(tok)})")
 
     train_records = load_split_records("train", data_dir)
     dev_records   = load_split_records("dev",   data_dir)

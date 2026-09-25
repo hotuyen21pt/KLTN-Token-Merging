@@ -20,7 +20,8 @@ torch>=2.0.0
 transformers>=4.36.0
 pandas>=1.5.0
 scikit-learn>=1.2.0
-python-Levenshtein>=0.25.0
+# python-Levenshtein: đã bỏ. src/normalization.py tự cài đặt
+# levenshtein_distance() bằng Python thuần để chạy được trên Kaggle offline.
 tqdm>=4.66.0
 fastapi>=0.109.0
 uvicorn>=0.24.0

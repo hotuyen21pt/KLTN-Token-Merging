@@ -70,6 +70,7 @@ def main() -> None:
 
     train_loader, dev_loader, test_loader, tokenizer = create_dataloaders(
         data_dir=args.data_dir,
+        model_name=args.model_name,
         batch_size=args.batch_size,
         max_input_length=args.max_input_length,
         max_target_length=args.max_target_length,

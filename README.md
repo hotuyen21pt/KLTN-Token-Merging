@@ -339,7 +339,6 @@ pip install -r requirements.txt
 | `torch` | ≥ 2.0.0 | Deep learning framework |
 | `transformers` | ≥ 4.36.0 | T5 / BERT pretrained models |
 | `pyabsa` | ≥ 2.4.0, < 3 | ABSA utilities & tokenizer helpers |
-| `python-Levenshtein` | ≥ 0.25.0 | Chuẩn hoá đầu ra ATE |
 | `scikit-learn` | ≥ 1.2.0 | Weighted loss, classification metrics |
 | `fastapi` + `uvicorn` | ≥ 0.109.0 | REST API backend |
 | `python-docx` | ≥ 0.8.12 | Upload file .docx |
