@@ -46,7 +46,7 @@ from src.dataset import (
     create_dataloaders,
     get_raw_split_records,
 )
-from src.model import T5AspectExtractor
+from src.model import GenerationConfig, T5AspectExtractor
 from src.trainer import ATETrainer
 from src.inference import predict_aspects_for_records
 from src.metrics import evaluate_exact_match
@@ -90,6 +90,8 @@ def train_one_seed_ate(
     pred_csv: Path,
     skip_if_exists: bool = False,
     patience: int = 4,
+    num_beams: int = 4,
+    length_penalty: float = 1.0,
 ) -> Optional[Dict]:
     """Train ATE for one seed; return metrics dict."""
     meta_path = ckpt_dir / "meta.json"
@@ -114,7 +116,16 @@ def train_one_seed_ate(
     dev_records  = get_raw_split_records("dev",  data_dir)
     test_records = get_raw_split_records("test", data_dir)
 
-    model = T5AspectExtractor(model_name=model_name)
+    # max_length của beam search phải bám theo max_target_length, nếu không
+    # thì nới max_target_length cũng vô nghĩa vì sinh vẫn bị chặn ở 64.
+    gen_cfg = GenerationConfig(
+        max_length=max_target_length,
+        num_beams=num_beams,
+        length_penalty=length_penalty,
+    )
+    print(f"[gen] beams={num_beams}  length_penalty={length_penalty}  "
+          f"max_length={max_target_length}")
+    model = T5AspectExtractor(model_name=model_name, generation=gen_cfg)
     if tokenizer is not None:
         model.tokenizer = tokenizer
 
@@ -143,6 +154,8 @@ def train_one_seed_ate(
         "test_precision":  round(float(tm.get("precision", 0.0)), 4),
         "test_recall":     round(float(tm.get("recall", 0.0)), 4),
         "test_f1":         round(float(tm.get("f1", 0.0)), 4),
+        "num_beams":       num_beams,
+        "length_penalty":  length_penalty,
         "wall_time_sec":   result.get("wall_time_sec", 0.0),
         "best_checkpoint": result.get("best_checkpoint", ""),
     }
@@ -158,7 +171,7 @@ def train_one_seed_ate(
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         eval_model = T5AspectExtractor.from_pretrained(
-            best_ckpt, device=train_device
+            best_ckpt, device=train_device, generation=gen_cfg
         )
     else:
         eval_model = model
@@ -251,6 +264,12 @@ def parse_args() -> argparse.Namespace:
                    help="Output dir for per-seed prediction CSVs")
     p.add_argument("--ckpt-dir", default=str(CKPT_BASE),
                    help="Base checkpoint dir (seed subdirs created here)")
+    p.add_argument("--num-beams", type=int, default=4,
+                   help="Số beam khi sinh (mặc định: 4)")
+    p.add_argument("--length-penalty", type=float, default=1.0,
+                   help="Beam search chấm điểm logprob/len**lp. > 1.0 ưu tiên "
+                        "chuỗi dài hơn, chữa lỗi sinh thiếu aspect. Chọn giá "
+                        "trị bằng common/sweep_ate_generation.py (mặc định: 1.0)")
     p.add_argument("--patience", type=int, default=4,
                    help="Dừng sớm khi dev F1 không cải thiện sau N epoch "
                         "(0 = tắt early stopping). Mặc định: 4")
@@ -274,6 +293,7 @@ def main() -> None:
     print(f"Model      : {args.model_name}")
     print(f"Seeds      : {args.seeds}")
     print(f"Epochs     : {args.epochs}   LR: {args.lr}   Batch: {args.batch_size}")
+    print(f"Generation : beams={args.num_beams}  length_penalty={args.length_penalty}")
     print(f"Patience   : {args.patience}" + ("" if args.patience > 0 else "  (tắt early stopping)"))
     print(f"ATE CSVs → : {runs_ate}/seed_<N>/test_predictions.csv")
     print(f"Checkpoints: {ckpt_base}/seed_<N>/")
@@ -311,6 +331,8 @@ def main() -> None:
             pred_csv=pred_csv,
             skip_if_exists=args.resume,
             patience=args.patience,
+            num_beams=args.num_beams,
+            length_penalty=args.length_penalty,
         )
         if m:
             per_seed_metrics.append(m)

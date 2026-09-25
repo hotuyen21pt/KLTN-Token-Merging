@@ -15,9 +15,23 @@ DEFAULT_MODEL_NAME = "t5-base"
 
 @dataclass
 class GenerationConfig:
+    """Tham số beam search cho ATE sinh chuỗi "(a); (b); ...".
+
+    ``length_penalty`` là núm quan trọng nhất của bài này. Beam search chấm
+    điểm chuỗi bằng ``logprob / len ** length_penalty``; với mặc định 1.0 của
+    HF, chuỗi ngắn gần như luôn thắng, nên model có xu hướng dừng sau 1-2
+    aspect kể cả khi câu có 4-6 aspect. Đo trên tập test: câu 1 gold đạt
+    recall 60.8% nhưng câu 4 gold chỉ còn 18.1%, trung bình sinh 1.19 aspect
+    trong khi gold 1.51. Đặt > 1.0 để ưu tiên chuỗi dài hơn.
+
+    Giữ mặc định 1.0 để không đổi lặng lẽ kết quả đã có; chọn giá trị bằng
+    ``common/sweep_ate_generation.py`` trên tập dev rồi truyền vào.
+    """
+
     max_length: int = 64
     num_beams: int = 4
     early_stopping: bool = True
+    length_penalty: float = 1.0
 
 
 class T5AspectExtractor:
@@ -81,6 +95,7 @@ class T5AspectExtractor:
             "max_length": self.generation.max_length,
             "num_beams": self.generation.num_beams,
             "early_stopping": self.generation.early_stopping,
+            "length_penalty": self.generation.length_penalty,
         }
         gen_kwargs.update(override_kwargs)
 
