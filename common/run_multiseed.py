@@ -348,6 +348,11 @@ def _norm(t): return t.strip().lower()
 
 
 def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=32):
+    """Evaluate strict triplet F1 over all ATE terms generated per sentence.
+
+    Gold triplets are never used to select the ATE term. Missing ATE predictions
+    therefore remain false negatives; incorrect terms can add false positives.
+    """
     if not Path(ate_csv_path).is_file():
         return None
     id2cat = {v: k for k, v in aspect_cat_map.items()}
@@ -361,23 +366,12 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
             e["aspect_category"].strip().upper(),
             e["sentiment"].strip().capitalize(),
         ))
-    best_term_by_sent = {}
+    samples = []
     for r in rows:
         sent = r["sentence"].strip()
         term = r["predicted_term"].strip()
-        if not sent or not term:
-            continue
-        try:
-            confidence = float(r.get("aspect_confidence", ""))
-        except (TypeError, ValueError):
-            confidence = None
-        current = best_term_by_sent.get(sent)
-        if current is None or (
-            confidence is not None
-            and (current[1] is None or confidence > current[1])
-        ):
-            best_term_by_sent[sent] = (term, confidence)
-    samples = [(sent, item[0]) for sent, item in best_term_by_sent.items()]
+        if sent and term:
+            samples.append((sent, term))
     pred_by_sent = defaultdict(set)
     model.eval()
     for i in range(0, len(samples), batch_size):
@@ -401,12 +395,47 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
     for sent in set(gold_by_sent) | set(pred_by_sent):
         golds = gold_by_sent.get(sent, set())
         preds = pred_by_sent.get(sent, set())
-        for t in preds:
+        matched = preds & golds
+        for t in matched:
             k = f"{t[1]}_{t[2]}"
-            if t in golds: tp += 1; cls_tp[k] += 1
-            else:          fp += 1; cls_fp[k] += 1
-        for t in golds:
-            if t not in preds: fn += 1; cls_fn[f"{t[1]}_{t[2]}"] += 1
+            tp += 1
+            cls_tp[k] += 1
+        for t in preds - golds:
+            k = f"{t[1]}_{t[2]}"
+            fp += 1
+            cls_fp[k] += 1
+        for t in golds - preds:
+            fn += 1
+            cls_fn[f"{t[1]}_{t[2]}"] += 1
+
+    debug_prefix = "Beautiful area gorgeous garden the rooms were comfortable and spacious"
+    debug_sentence = next(
+        (sent for sent in gold_by_sent if sent.startswith(debug_prefix)),
+        None,
+    )
+    if debug_sentence is not None:
+        debug_gold = gold_by_sent[debug_sentence]
+        debug_pred = pred_by_sent.get(debug_sentence, set())
+        debug_terms = [
+            row["predicted_term"].strip()
+            for row in rows
+            if row["sentence"].strip() == debug_sentence
+            and row["predicted_term"].strip()
+        ]
+        print("\n[E2E debug] grouped unique sentence count:", len(gold_by_sent))
+        print("[E2E debug] sentence:", ascii(debug_sentence))
+        print("[E2E debug] gold aspect terms:", sorted({t[0] for t in debug_gold}))
+        print("[E2E debug] MT5 predicted aspect terms:", debug_terms)
+        print("[E2E debug] predicted triplets:", sorted(debug_pred))
+        print("[E2E debug] gold triplets:", sorted(debug_gold))
+        print(
+            "[E2E debug] TP/FP/FN:",
+            len(debug_pred & debug_gold),
+            len(debug_pred - debug_gold),
+            len(debug_gold - debug_pred),
+        )
+    else:
+        print("\n[E2E debug] example sentence not present in TEST_APC")
     mp  = tp/(tp+fp)*100 if tp+fp else 0.0
     mr  = tp/(tp+fn)*100 if tp+fn else 0.0
     mf1 = 2*mp*mr/(mp+mr) if mp+mr else 0.0
