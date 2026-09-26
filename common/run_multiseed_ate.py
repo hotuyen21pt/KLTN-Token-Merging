@@ -48,7 +48,7 @@ from src.dataset import (
 )
 from src.model import GenerationConfig, T5AspectExtractor
 from src.trainer import ATETrainer
-from src.inference import predict_aspects_for_records
+from src.inference import predict_aspects_for_records, score_aspect_terms
 from src.metrics import evaluate_exact_match
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
@@ -181,6 +181,11 @@ def train_one_seed_ate(
         eval_model, test_records,
         max_input_length=max_input_length,
     )
+    pred_confidences = score_aspect_terms(
+        eval_model, test_records, preds,
+        max_input_length=max_input_length,
+        max_target_length=max_target_length,
+    )
     # Verify metrics on the actual prediction output
     final_metrics = evaluate_exact_match(preds, golds)
     metrics["test_precision"] = round(float(final_metrics.get("precision", 0.0)), 4)
@@ -190,15 +195,18 @@ def train_one_seed_ate(
     # ── Save per-seed predictions CSV ─────────────────────────────────────────
     pred_csv.parent.mkdir(parents=True, exist_ok=True)
     rows_to_write = []
-    for record, pred_terms, gold_terms in zip(test_records, preds, golds):
+    for record, pred_terms, gold_terms, term_scores in zip(
+        test_records, preds, golds, pred_confidences
+    ):
         sentence = str(record["input_text"])
         gold_str = "|".join(gold_terms)
         if pred_terms:
-            for pt in pred_terms:
+            for pt, confidence in zip(pred_terms, term_scores):
                 rows_to_write.append({
                     "sentence":       sentence,
                     "predicted_term": pt,
                     "gold_terms":     gold_str,
+                    "aspect_confidence": f"{confidence:.8f}",
                 })
         else:
             # No prediction → empty row so the sentence still appears in e2e eval
@@ -206,9 +214,13 @@ def train_one_seed_ate(
                 "sentence":       sentence,
                 "predicted_term": "",
                 "gold_terms":     gold_str,
+                "aspect_confidence": "",
             })
     with open(pred_csv, "w", newline="", encoding="utf-8") as f:
-        w = csv.DictWriter(f, fieldnames=["sentence", "predicted_term", "gold_terms"])
+        w = csv.DictWriter(
+            f,
+            fieldnames=["sentence", "predicted_term", "gold_terms", "aspect_confidence"],
+        )
         w.writeheader()
         w.writerows(rows_to_write)
     print(f"    Predictions → {pred_csv}  ({len(rows_to_write)} rows)")

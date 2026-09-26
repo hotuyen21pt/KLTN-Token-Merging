@@ -11,6 +11,7 @@ from src.model import T5AspectExtractor
 from src.normalization import (
     decode_and_normalize,
     decode_target_text,
+    format_aspects_for_display,
 )
 
 
@@ -95,6 +96,61 @@ def predict_aspects_for_records(
             )
 
     return predictions, golds
+
+
+def score_aspect_terms(
+    model: T5AspectExtractor,
+    records: Sequence[Dict[str, object]],
+    predictions: Sequence[Sequence[str]],
+    *,
+    max_input_length: int = 128,
+    max_target_length: int = 64,
+    batch_size: int = 32,
+) -> List[List[float]]:
+    """Return mean token-likelihood scores for each generated term candidate."""
+    candidates = []
+    scores_by_record: List[List[float]] = [[] for _ in records]
+    for record_index, (record, aspects) in enumerate(zip(records, predictions)):
+        sentence = str(record["input_text"])
+        for aspect in aspects:
+            if aspect and aspect.strip():
+                candidates.append((record_index, sentence, aspect.strip()))
+
+    model.model.eval()
+    for start in range(0, len(candidates), batch_size):
+        chunk = candidates[start : start + batch_size]
+        encoded = model.tokenizer(
+            [sentence for _, sentence, _ in chunk],
+            max_length=max_input_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        labels = model.tokenizer(
+            [format_aspects_for_display([aspect]) for _, _, aspect in chunk],
+            max_length=max_target_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )["input_ids"].to(model.device)
+        labels[labels == model.tokenizer.pad_token_id] = -100
+        with torch.no_grad():
+            logits = model.model(
+                input_ids=encoded["input_ids"].to(model.device),
+                attention_mask=encoded["attention_mask"].to(model.device),
+                labels=labels,
+            ).logits.float()
+        valid = labels.ne(-100)
+        token_log_probs = torch.log_softmax(logits, dim=-1).gather(
+            -1, labels.clamp_min(0).unsqueeze(-1)
+        ).squeeze(-1)
+        mean_log_probs = (token_log_probs * valid).sum(dim=1) / valid.sum(
+            dim=1
+        ).clamp_min(1)
+        for (record_index, _, _), score in zip(chunk, mean_log_probs.exp().cpu().tolist()):
+            scores_by_record[record_index].append(float(score))
+
+    return scores_by_record
 
 
 def predict_batch(
