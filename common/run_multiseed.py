@@ -366,28 +366,13 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
             e["aspect_category"].strip().upper(),
             e["sentiment"].strip().capitalize(),
         ))
-    candidates_by_sent = defaultdict(dict)
     samples = []
-    for row_index, r in enumerate(rows):
+    for r in rows:
         sent = r["sentence"].strip()
         term = r["predicted_term"].strip()
-        if not sent or not term:
-            continue
-        try:
-            confidence = float(r.get("aspect_confidence", ""))
-        except (TypeError, ValueError):
-            confidence = None
-        term_key = _norm(term)
-        current = candidates_by_sent[sent].get(term_key)
-        if current is None or (
-            confidence is not None
-            and (current[1] is None or confidence > current[1])
-        ):
-            candidates_by_sent[sent][term_key] = (term, confidence, row_index)
-    for sent, candidates in candidates_by_sent.items():
-        samples.extend((sent, item[0]) for item in candidates.values())
+        if sent and term:
+            samples.append((sent, term))
     pred_by_sent = defaultdict(set)
-    pred_triplet_by_term = defaultdict(dict)
     model.eval()
     for i in range(0, len(samples), batch_size):
         chunk = samples[i: i + batch_size]
@@ -406,7 +391,6 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
                 SENTIMENT_LABELS[s].capitalize(),
             )
             pred_by_sent[st].add(triplet)
-            pred_triplet_by_term[st][_norm(pt)] = triplet
     tp = fp = fn = 0
     cls_tp = defaultdict(int); cls_fp = defaultdict(int); cls_fn = defaultdict(int)
     for sent in set(gold_by_sent) | set(pred_by_sent):
@@ -424,36 +408,6 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
         for t in golds - preds:
             fn += 1
             cls_fn[f"{t[1]}_{t[2]}"] += 1
-
-    def _ranked_terms(sentence):
-        candidates = list(candidates_by_sent.get(sentence, {}).items())
-        candidates.sort(
-            key=lambda item: (
-                item[1][1] is None,
-                -item[1][1] if item[1][1] is not None else 0.0,
-                item[1][2],
-            )
-        )
-        return candidates
-
-    oracle_tp = oracle_fp = oracle_fn = 0
-    for sent in set(gold_by_sent) | set(pred_by_sent):
-        golds = gold_by_sent.get(sent, set())
-        top_k = _ranked_terms(sent)[:len(golds)]
-        oracle_preds = {
-            pred_triplet_by_term[sent][term_key]
-            for term_key, _ in top_k
-            if term_key in pred_triplet_by_term[sent]
-        }
-        oracle_tp += len(oracle_preds & golds)
-        oracle_fp += len(oracle_preds - golds)
-        oracle_fn += len(golds - oracle_preds)
-    oracle_precision = oracle_tp / (oracle_tp + oracle_fp) * 100 if oracle_tp + oracle_fp else 0.0
-    oracle_recall = oracle_tp / (oracle_tp + oracle_fn) * 100 if oracle_tp + oracle_fn else 0.0
-    oracle_f1 = (
-        2 * oracle_precision * oracle_recall / (oracle_precision + oracle_recall)
-        if oracle_precision + oracle_recall else 0.0
-    )
 
     debug_prefix = "Beautiful area gorgeous garden the rooms were comfortable and spacious"
     debug_sentence = next(
@@ -473,9 +427,6 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
         print("[E2E debug] sentence:", ascii(debug_sentence))
         print("[E2E debug] gold aspect terms:", sorted({t[0] for t in debug_gold}))
         print("[E2E debug] MT5 predicted aspect terms:", debug_terms)
-        print("[E2E debug] oracle-cardinality selected terms:", [
-            term for _, (term, _, _) in _ranked_terms(debug_sentence)[:len(debug_gold)]
-        ])
         print("[E2E debug] predicted triplets:", sorted(debug_pred))
         print("[E2E debug] gold triplets:", sorted(debug_gold))
         print(
@@ -483,20 +434,6 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
             len(debug_pred & debug_gold),
             len(debug_pred - debug_gold),
             len(debug_gold - debug_pred),
-        )
-        debug_oracle_terms = {
-            term_key for term_key, _ in _ranked_terms(debug_sentence)[:len(debug_gold)]
-        }
-        debug_oracle_pred = {
-            pred_triplet_by_term[debug_sentence][term_key]
-            for term_key in debug_oracle_terms
-            if term_key in pred_triplet_by_term[debug_sentence]
-        }
-        print(
-            "[E2E debug] oracle-cardinality TP/FP/FN:",
-            len(debug_oracle_pred & debug_gold),
-            len(debug_oracle_pred - debug_gold),
-            len(debug_gold - debug_oracle_pred),
         )
     else:
         print("\n[E2E debug] example sentence not present in TEST_APC")
@@ -519,12 +456,6 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
         "e2e_macro_f1":        round(float(np.mean(cf1s))  if cf1s  else 0.0, 2),
         "e2e_macro_precision": round(float(np.mean(cps_list)) if cps_list else 0.0, 2),
         "e2e_macro_recall":    round(float(np.mean(crs_list)) if crs_list else 0.0, 2),
-        "e2e_oracle_cardinality_tp": oracle_tp,
-        "e2e_oracle_cardinality_fp": oracle_fp,
-        "e2e_oracle_cardinality_fn": oracle_fn,
-        "e2e_oracle_cardinality_micro_f1": round(oracle_f1, 2),
-        "e2e_oracle_cardinality_micro_precision": round(oracle_precision, 2),
-        "e2e_oracle_cardinality_micro_recall": round(oracle_recall, 2),
     }
 
 
@@ -674,11 +605,6 @@ def train_one_seed(
             print(f"      [e2e] MicroF1={r['e2e_micro_f1']:.2f}%"
                   f"  MacroF1={r['e2e_macro_f1']:.2f}%"
                   f"  (TP={r['e2e_tp']} FP={r['e2e_fp']} FN={r['e2e_fn']})")
-            print(f"      [e2e oracle-cardinality] MicroF1="
-                f"{r['e2e_oracle_cardinality_micro_f1']:.2f}%"
-                f"  (TP={r['e2e_oracle_cardinality_tp']} "
-                f"FP={r['e2e_oracle_cardinality_fp']} "
-                f"FN={r['e2e_oracle_cardinality_fn']})")
 
     result = {
         "seed": seed, "model_type": model_type, "config_id": short_id,
@@ -734,11 +660,6 @@ METRIC_COLS = [
     "joint_f1_macro", "joint_precision_macro", "joint_recall_macro",
     "e2e_micro_f1", "e2e_micro_precision", "e2e_micro_recall",
     "e2e_macro_f1", "e2e_macro_precision", "e2e_macro_recall",
-    "e2e_oracle_cardinality_micro_f1",
-    "e2e_oracle_cardinality_micro_precision",
-    "e2e_oracle_cardinality_micro_recall",
-    "e2e_oracle_cardinality_tp", "e2e_oracle_cardinality_fp",
-    "e2e_oracle_cardinality_fn",
 ]
 
 
@@ -993,11 +914,6 @@ _RAW_PRIORITY = [
     "e2e_micro_f1", "e2e_micro_precision", "e2e_micro_recall",
     "e2e_macro_f1", "e2e_macro_precision", "e2e_macro_recall",
     "e2e_tp", "e2e_fp", "e2e_fn",
-    "e2e_oracle_cardinality_micro_f1",
-    "e2e_oracle_cardinality_micro_precision",
-    "e2e_oracle_cardinality_micro_recall",
-    "e2e_oracle_cardinality_tp", "e2e_oracle_cardinality_fp",
-    "e2e_oracle_cardinality_fn",
     "use_lcf", "use_cdm", "use_tome", "tome_resize", "merge_strategy", "use_pre_tome",
 ]
 
