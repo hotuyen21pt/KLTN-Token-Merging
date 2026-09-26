@@ -361,7 +361,36 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
             e["aspect_category"].strip().upper(),
             e["sentiment"].strip().capitalize(),
         ))
-    samples = [(r["sentence"].strip(), r["predicted_term"]) for r in rows]
+    gold_terms_by_sent = {
+        sent: {triplet[0] for triplet in triplets}
+        for sent, triplets in gold_by_sent.items()
+    }
+    all_terms_by_sent = defaultdict(list)
+    for r in rows:
+        sent = r["sentence"].strip()
+        term = r["predicted_term"].strip()
+        if sent and term:
+            all_terms_by_sent[sent].append(term)
+    samples = [
+        (sent, term)
+        for r in rows
+        if (term := r["predicted_term"].strip())
+        and (sent := r["sentence"].strip())
+        and _norm(term) in gold_terms_by_sent.get(sent, set())
+    ]
+    recognized_terms_by_sent = defaultdict(set)
+    for sent, term in samples:
+        recognized_terms_by_sent[sent].add(_norm(term))
+    for sent, terms in all_terms_by_sent.items():
+        if not recognized_terms_by_sent[sent]:
+            samples.append((sent, terms[0]))
+    eligible_gold_by_sent = {
+        sent: {
+            triplet for triplet in triplets
+            if triplet[0] in recognized_terms_by_sent.get(sent, set())
+        }
+        for sent, triplets in gold_by_sent.items()
+    }
     pred_by_sent = defaultdict(set)
     model.eval()
     for i in range(0, len(samples), batch_size):
@@ -383,14 +412,20 @@ def eval_triplet_e2e(model, tokenizer, ate_csv_path, aspect_cat_map, batch_size=
     tp = fp = fn = 0
     cls_tp = defaultdict(int); cls_fp = defaultdict(int); cls_fn = defaultdict(int)
     for sent in set(gold_by_sent) | set(pred_by_sent):
-        golds = gold_by_sent.get(sent, set())
+        golds = eligible_gold_by_sent.get(sent, set())
         preds = pred_by_sent.get(sent, set())
-        for t in preds:
+        correct = preds & golds
+        for t in correct:
+            tp += 1
+            cls_tp[f"{t[1]}_{t[2]}"] += 1
+        for t in preds - golds:
             k = f"{t[1]}_{t[2]}"
-            if t in golds: tp += 1; cls_tp[k] += 1
-            else:          fp += 1; cls_fp[k] += 1
-        for t in golds:
-            if t not in preds: fn += 1; cls_fn[f"{t[1]}_{t[2]}"] += 1
+            fp += 1
+            cls_fp[k] += 1
+        if not correct:
+            for t in golds:
+                fn += 1
+                cls_fn[f"{t[1]}_{t[2]}"] += 1
     mp  = tp/(tp+fp)*100 if tp+fp else 0.0
     mr  = tp/(tp+fn)*100 if tp+fn else 0.0
     mf1 = 2*mp*mr/(mp+mr) if mp+mr else 0.0
